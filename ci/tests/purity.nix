@@ -11,13 +11,26 @@
 #
 # ★★ AND `stripComments` IS LOAD-BEARING HERE RATHER THAN A COURTESY TO DOCUMENTATION — measured.
 # The forbidden list contains ordinary English words and this library's source is roughly 60%
-# prose. Over the moved span alone: raw ⇒ ONE `merge` hit, comment-stripped ⇒ ZERO. The hit is the
-# word "merges" in a correct English sentence — "an identity minted over a partial preimage
-# MERGES behaviourally distinct values" — caught because the scan is a substring test and `merge`
-# is a substring of `merges`. Without inherited comment-stripping this oracle reds on the
-# library's own shipped commentary, on day one, for a sentence that is true. A purity scan that
-# fails on true prose gets weakened by whoever meets it next, and the weakening lands on the
-# token list rather than on the predicate.
+# prose, so the raw text trips the scan in several places while the CODE trips it nowhere.
+#
+# Measured over `lib/default.nix` as shipped: RAW ⇒ SEVEN hits across FIVE forbidden tokens;
+# comment-stripped ⇒ ZERO across all fourteen. The seven:
+#
+#   `merge`   — "an identity minted over a partial preimage MERGES behaviourally distinct values",
+#               a substring hit on a correct English sentence
+#   `graph`   — inside the word "crypto-GRAPH-ic", which is not even a word about a dependency
+#   `schema`  — ×3, this file's own header explaining that the reflection half stays in gen-schema
+#   `types`   — "gen-types cannot reach gen-schema without closing a flake cycle", the sentence
+#               that states WHY this library exists
+#   `nixpkgs` — the header sentence describing this very scan
+#
+# ★ THE LAST THREE ARE THE STRONGER ARGUMENT, because they are not accidents of substring
+# matching: a library whose whole reason for existing is WHERE IT SITS RELATIVE TO OTHER
+# LIBRARIES cannot document itself without naming them. Without inherited comment-stripping this
+# oracle reds on the library's own explanation of itself, on day one, for prose that is true. A
+# purity scan that fails on true prose gets weakened by whoever meets it next, and the weakening
+# lands on the token list rather than on the predicate — which is how a scan quietly stops
+# checking the thing it was written for.
 #
 # Scope: lib/**.nix + the root flake.nix + default.nix (the library and its entries). NOT ci/ —
 # the test harness legitimately uses the nixpkgs lib, including to run this scan.
