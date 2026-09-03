@@ -54,6 +54,8 @@ caller to shape it.
 
 ## Traps
 
+<!-- gen-citations:begin -->
+
 | Trap                                                                                                                                                                                                                                                           | Evidence                                                                                 |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | **The mint FORCES its input.** A lazily-failing leaf in a value fails at mint time, not at first read                                                                                                                                                          | `lib/default.nix`, binding `canonicalEncode`; the walk forces every node it encodes      |
@@ -63,6 +65,8 @@ caller to shape it.
 | **The depth bound's margin is ~6×, not an order of magnitude**, and the binding guard is Nix's `max-call-depth` (10,000), not a raw C stack — roughly 3 call frames per level                                                                                  | `lib/default.nix`, the two-bounds comment block                                          |
 | **A cycle is caught by the DEPTH bound alone.** Its length crossover sits above the call-depth guard, so no budget setting exists at which length saves it                                                                                                     | `ci/tests/identity-encoding.nix`, `test-depth-bound-straddles-its-boundary`              |
 | **The purity scan forbids substrate identifiers too**, not only nixpkgs tokens — and `stripComments` is load-bearing, not a courtesy: the word "merges" in correct English prose is a `merge` substring hit                                                    | `ci/tests/purity.nix`, and its two controls                                              |
+
+<!-- gen-citations:end -->
 
 ## Checked invariants
 
