@@ -83,3 +83,22 @@ integral-float normalisation) · ADR-0016 ruling 5 (one minting authority; the s
 rather than inventing an identity) · ADR-0034 (identity is structural through the mint; the
 domain is inert structure; what cannot be encoded gets no identity at all). The design of record
 for `lib/default.nix`'s commentary is the closure-identity spec.
+
+## Drift check
+
+From the repository root:
+
+```sh
+nix eval --json .#lib --apply builtins.attrNames
+```
+
+Current output (verbatim):
+
+```json
+["hashIdentity"]
+```
+
+A one-name list is the claim rather than a truncated check. `canonicalEncode` and the bounds
+beneath it are internal **by decision** (see *When the encoder publishes*), and
+`ci/tests/surface.nix` pins the surface by contents — so a second name appearing in this block is
+the drift, not the fix.
