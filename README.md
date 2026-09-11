@@ -1,7 +1,7 @@
 # gen-identity — the substrate's one identity mint
 
-`hashIdentity` is the one minting authority for the gen ecosystem; nothing else mints
-(ADR-0016 ruling 5). An identity is a kind tag joined to a digest of the ⟨label, value⟩ pairs:
+`hashIdentity` is the one minting authority for the gen ecosystem; nothing else mints.
+An identity is a kind tag joined to a digest of the ⟨label, value⟩ pairs:
 
 ```
 identity = "<kind>:" + sha256(<pairs preimage>)
@@ -74,10 +74,10 @@ boundary straddles), `purity` (the dependency-free invariant, with its two contr
 
 The encoding follows the language's `==` in **both directions** — neither coarser nor finer —
 over the whole admitted domain. That biconditional, the strict float bound and integral-float
-normalisation are ADR-0016 ruling 4's terms; the domain extension to inert composites, the
-type tags and the bounded walk are ADR-0034's. The design of record for every sentence in
-`lib/default.nix`'s commentary is the closure-identity spec, which reached it over eleven gate
-rounds; the commentary travelled with the code when the mint moved here from gen-schema, because
+normalisation are the mint's original terms; the domain extension to inert composites, the
+type tags and the bounded walk came later, when identity was made structural. The reasoning
+behind every sentence of `lib/default.nix`'s commentary was settled before the code landed,
+and the commentary travelled with the code when the mint moved here from gen-schema, because
 a comment block belongs to the code it documents.
 
 ## Gen Ecosystem
