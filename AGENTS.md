@@ -1,5 +1,7 @@
 # gen-identity — agent cheatsheet
 
+> **Library class: reference-grade.** Deletion requires a domain argument — wrong abstraction, subsumption by another construct, or theory-unsoundness; a usage count is inadmissible as a deletion ground (P7, 2026-08-17).
+
 ## Scope
 
 The gen ecosystem's **one minting authority**. `hashIdentity` turns a kind tag, a label list and
