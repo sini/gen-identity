@@ -28,7 +28,8 @@ Zero dependencies — not nixpkgs, not any gen substrate. The `lib` output is a 
 }
 ```
 
-Without flakes: `import ./path/to/gen-identity` is the lib value itself, not a function.
+Without flakes: `import ./path/to/gen-identity` is a nullary function over the lib value —
+`import ./path/to/gen-identity { }` (den-hoag-iev2q).
 
 ## The surface
 
