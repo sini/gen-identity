@@ -164,6 +164,17 @@ let
 
   forbidden = forbiddenNixpkgs ++ forbiddenSubstrate;
 
+  # The live counterpart to `forbidden`: the name this library reaches for where a tether would reach
+  # for a substrate. `builtins` is not merely present, it is the WHOLE of what this library is allowed
+  # to name — the mint is builtins and nothing else — so it is the exact dual of the two forbidden
+  # halves above. Every gen-identity source but ONE carries it, and that exclusion is the root
+  # `default.nix`, whose entire body is `{ }: import ./lib` and which therefore names no builtin. That
+  # exclusion is what gives the assertion its teeth: the expected list is a PROPER SUBSET of the
+  # manifest, so a read returning one fixed text for every file lands outside it either way — without
+  # the token the list collapses toward empty, with it the list swells to every source.
+  liveToken = "builtins";
+  liveReads = map (src: src.name) (lib.filter (src: lib.hasInfix liveToken src.code) sources);
+
   # scan : [ { name; code; } ] -> [ "file: 'tok'" ]. Factored out of `violations` so the detector
   # cell below runs THE SAME call over the same source list with one entry appended, rather than a
   # second copy of the predicate that could drift from this one.
@@ -190,9 +201,44 @@ in
       expected = [ ];
     };
 
-    # The scan reaches real files with real content. A vacuous `sources` — an empty lib/, a
-    # readDir that found nothing — would report the invariant clean without testing it, so the
-    # non-emptiness is asserted rather than assumed.
+    # What the cell above is a statement ABOUT. Its `[ ]` is produced just as readily by a scan that
+    # reads the wrong tree, or no tree, as by a library that is dependency-free, and neither the
+    # controls below nor a guard on the source list's SIZE can tell those apart — the first speak
+    # about a planted literal, and the second answers a question about how many rather than which.
+    # Disconnection is an IDENTITY defect: a scan that had dropped the library file and kept only the
+    # two root entries is non-empty, has non-empty content, and reports the invariant clean over a set
+    # containing none of the library. So membership is written down as the label list itself.
+    # Asserting the list also makes a second library module arrive as a RED rather than being absorbed
+    # silently, which is the point — the scope of an invariant is a declared surface, not a default,
+    # and for THIS library the surface is the whole of the claim: *dependency-free* is a statement
+    # about a named set of files, not about however many a walk happened to find.
+    test-scan-subject-is-the-library-tree = {
+      expr = map (s: s.name) sources;
+      expected = [
+        "lib/default.nix"
+        "flake.nix"
+        "default.nix"
+      ];
+    };
+
+    # And that those labels carry their files' text. The manifest above pins membership and is silent
+    # on content: a read that handed every entry one fixed string would satisfy it exactly, and a live
+    # `prelude.foo` sitting in the real library file would pass through all of the other cells here at
+    # exit 0. This is the same shape as the manifest — an exact list, not a count — asked of a token
+    # that is genuinely present rather than genuinely absent, so the reads are shown to carry this
+    # repository's source and not a constant.
+    test-scan-reads-are-live = {
+      expr = liveReads;
+      expected = [
+        "lib/default.nix"
+        "flake.nix"
+      ];
+    };
+
+    # The residual content floor for the one label the live list cannot reach. `sources != [ ]` is
+    # this cell's own vacuity guard — `all` over an empty list is true — and it is a floor, NOT a
+    # subject pin: a non-empty constant substituted for a source passes it exactly as the real text
+    # does, which is why the two cells above exist rather than this one carrying the subject.
     test-control-scan-reads-non-empty-sources = {
       expr = sources != [ ] && lib.all (s: s.code != "") sources;
       expected = true;
