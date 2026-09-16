@@ -185,14 +185,6 @@ let
     ) srcs;
 
   violations = scan sources;
-
-  # Positive control for the scan itself: the same predicate, in the same run, over a string that
-  # DOES contain forbidden tokens — one from each half, so neither half can be silently dead. An
-  # empty `violations` above is evidence only if this is non-empty; otherwise a broken `hasInfix`
-  # or an empty `sources` would report clean.
-  controlViolations = lib.filter (
-    tok: lib.hasInfix tok "let x = evalModules { }; y = prelude.foo; in x"
-  ) forbidden;
 in
 {
   flake.tests.purity = {
@@ -244,13 +236,32 @@ in
       expected = true;
     };
 
-    # The forbidden-token scan is LIVE, and both halves of it are. A run in which this is empty
-    # has not tested the invariant above — it has tested a dead predicate.
-    test-control-forbidden-token-scan-is-live = {
-      expr = lib.sort (a: b: a < b) controlViolations;
+    # The detector has teeth, and it grows them on the real subject: the scan runs over exactly the
+    # source list the cell above asserts, with one synthetic entry appended. So the firing is proven by
+    # the same call that reports the tree clean, and the expectation states both halves at once — the
+    # library contributes nothing and the planted tether contributes precisely this, from BOTH forbidden
+    # halves at once: `lib.types.str` is a nixpkgs-lib call whose type name is also this ecosystem's
+    # substrate identifier, so one plant exercises both `forbiddenNixpkgs` and `forbiddenSubstrate`.
+    #
+    # The expectation is the violation LIST, not merely that one was produced: a detector that fires on
+    # the wrong token, or whose `file: 'tok'` message has decayed into something a reader cannot act on
+    # off a red CI, is broken in the way that matters and a bare non-emptiness check would pass it. The
+    # synthetic entry is never written to disk, and its label is bracketed so it cannot be read as one
+    # of the repo-root-relative paths it now sits beside. Its trailing comment names `nixpkgs`, which
+    # the strip removes — so this cell also fails if the strip stops running.
+    test-detector-catches-injected-violation = {
+      expr = scan (
+        sources
+        ++ [
+          {
+            name = "<injected>";
+            code = stripComments "  foo = lib.types.str; # comment mentioning nixpkgs is stripped";
+          }
+        ]
+      );
       expected = [
-        "evalModules"
-        "prelude"
+        "<injected>: 'lib.'"
+        "<injected>: 'types'"
       ];
     };
 
