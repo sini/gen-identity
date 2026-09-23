@@ -16,6 +16,8 @@
       inherit inputs;
       name = "gen-identity";
       testModules = ./tests;
+      # `./ci#testsError` — refusal cells that pin the MESSAGE; see the file's header.
+      extraModules = [ ./tests-error.nix ];
       specialArgs = { inherit genIdentity; };
     };
 }

@@ -53,8 +53,8 @@ than blocked case by case — a string can never render as a list, because its r
 **Refused by name** — a lambda (no builtin exposes a closure's captured environment or its
 body, so no preimage over one can be total), a path (`toJSON` on a file path silently copies it
 to the store), a derivation (its output attribute is self-referential, so an unbounded walk does
-not terminate), a float outside `|v| < 2^53`, an empty kind, a kind containing `:`, zero labels,
-and a duplicate label.
+not terminate), a float outside `|v| < 2^53`, a non-string or empty kind, a kind containing `:`,
+zero labels, a non-string label, and a duplicate label.
 
 **Bounded on three axes.** Preimage LENGTH and walk DEPTH are declared bounds; BREADTH is
 answered by forcing both fold accumulator fields at every step, which is what makes the length
@@ -64,12 +64,13 @@ budget bite on that axis at all. Exhausting any of them is a refusal by name, ne
 
 ```bash
 nix-unit --flake ./ci#tests
+nix-unit --flake ./ci#testsError
 nix repl --impure --file ci/repl.nix
 ```
 
-62 cells across three suites: `identity-encoding` (the laws, the domain, the forgery arms, both
+67 cells across three suites: `identity-encoding` (the laws, the domain, the forgery arms, both
 boundary straddles), `purity` (the dependency-free invariant, with its two controls), `surface`
-(the export pin).
+(the export pin). `testsError` (`ci/tests-error.nix`) holds 2 more that pin a refusal's message.
 
 ## Theory
 

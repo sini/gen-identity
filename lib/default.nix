@@ -309,6 +309,11 @@ let
     in
     if labels == [ ] then
       throw "identity: zero identity keys"
+    # Before `listToAttrs` is forced: its own type failure on a non-string name escapes `tryEval`.
+    else if !builtins.all builtins.isString labels then
+      throw "identity: a ${
+        builtins.typeOf (builtins.head (builtins.filter (l: !builtins.isString l) labels))
+      } as an identity-key label; a label is a string"
     else if builtins.length labels != builtins.length (builtins.attrNames pairs) then
       throw "identity: duplicate identity key"
     else
@@ -335,7 +340,10 @@ let
   # incidental: data is escaped, structure is constrained.
   hashIdentity =
     kind: labels: valueOf:
-    if kind == "" then
+    # First, so only a string reaches `match` and the join: a builtin's type failure escapes `tryEval`.
+    if !builtins.isString kind then
+      throw "identity: a ${builtins.typeOf kind} as the relation kind; a kind is a string"
+    else if kind == "" then
       throw "identity: empty relation kind"
     else if builtins.match "[^:]*" kind == null then
       throw "identity: ':' is the kind separator and is refused in a kind name"

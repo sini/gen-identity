@@ -16,4 +16,6 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - run: nix flake check
+      # `nix flake check` covers `tests` only; the message-pinning cells live on `testsError`.
+      - run: nix develop --command nix-unit --flake .#testsError
       - run: nix fmt -- --ci
