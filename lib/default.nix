@@ -7,7 +7,11 @@
 #
 # and the preimage is produced by a BOUNDED, TYPE-TAGGED canonical encoding of inert Nix
 # values. What cannot be encoded totally gets no identity at all and is refused by name — a
-# lambda, a path, a derivation, a value that diverges under its own bounds.
+# lambda, a path, a derivation, a value that diverges under its own bounds. String CONTEXT is
+# not identity-bearing, at any position the mint takes a string: a context-carrying string — a
+# derivation's string form included — is admitted as its text, mints the identity of its `==`
+# context-free twin, and no minted identity carries context (ADR-0016 ruling 4, inherited by
+# ADR-0034 over the whole admitted domain; `ci/tests/string-context.nix`).
 #
 # ★ THIS LIBRARY IS DEPENDENCY-FREE, AND THAT IS A MEASUREMENT RATHER THAN AN INTENTION. The
 # content below is `builtins` and nothing else: it evaluates with every substrate argument
@@ -217,6 +221,12 @@ let
     d: b: v:
     if d > identityDepth then
       throw "identity: value nests deeper than the identity depth bound"
+    # A string's CONTEXT is not identity-bearing: `==` ignores it, and ruling 4 makes `==` the
+    # reference relation. The digest is context-free because `hashString` returns a fresh string, so
+    # no discard is owed here. The derivation exclusion below is a TYPE test on the value, for
+    # termination; a derivation's string form is a leaf and reaches no store effect, so it mints as
+    # its text. That its `toJSON` IS its store path reaches the text alone, which the context-free
+    # twin shares, so it grounds no distinction by context.
     else if builtins.isString v then
       emit b ("s" + builtins.toJSON v)
     else if builtins.isBool v then
@@ -301,8 +311,12 @@ let
     labels: valueOf:
     let
       pairs = builtins.listToAttrs (
+        # A label's context is discarded (ruling 4): `listToAttrs` aborts uncatchably on a context-
+        # carrying name, and two labels differing only in context are `==`-duplicates, refused
+        # below by name. The non-string guard is forced first, so the discard never coerces a set
+        # or a path. Live for DIRECT callers only: labels built from `attrNames` carry no context.
         map (l: {
-          name = l;
+          name = builtins.unsafeDiscardStringContext l;
           value = valueOf l;
         }) labels
       );
@@ -347,8 +361,12 @@ let
       throw "identity: empty relation kind"
     else if builtins.match "[^:]*" kind == null then
       throw "identity: ':' is the kind separator and is refused in a kind name"
+    # The kind's context is discarded (ruling 4): riding outside the digest, it would otherwise carry
+    # a store dependency into the identity, which then aborts as an attribute name. Only a string
+    # reaches here — the guards above must stay first, or the discard would coerce a set.
     else
-      "${kind}:" + builtins.hashString "sha256" (canonicalPreimage labels valueOf);
+      "${builtins.unsafeDiscardStringContext kind}:"
+      + builtins.hashString "sha256" (canonicalPreimage labels valueOf);
 in
 {
   inherit hashIdentity;
