@@ -224,8 +224,10 @@ let
     # A string's CONTEXT is not identity-bearing: `==` ignores it, and ruling 4 makes `==` the
     # reference relation. The digest is context-free because `hashString` returns a fresh string, so
     # no discard is owed here. The derivation exclusion below is a TYPE test on the value, for
-    # termination; a derivation's string form is a leaf and reaches no store effect, so it mints as
-    # its text. That its `toJSON` IS its store path reaches the text alone, which the context-free
+    # termination; a derivation's string form is a leaf and, inside the mint, reaches no store effect
+    # (`toJSON` and `hashString` perform none), so it mints as its text. That holds only here: a
+    # consumer keying an attrset by the INPUT string, not by the identity, still meets Nix's
+    # attribute-name refusal. That its `toJSON` IS its store path reaches the text alone, which the context-free
     # twin shares, so it grounds no distinction by context.
     else if builtins.isString v then
       emit b ("s" + builtins.toJSON v)
@@ -315,10 +317,18 @@ let
         # carrying name, and two labels differing only in context are `==`-duplicates, refused
         # below by name. The non-string guard is forced first, so the discard never coerces a set
         # or a path. Live for DIRECT callers only: labels built from `attrNames` carry no context.
-        map (l: {
-          name = builtins.unsafeDiscardStringContext l;
-          value = valueOf l;
-        }) labels
+        # `valueOf` receives the DISCARDED label too: a caller indexing by it (`l: relata.${l}`)
+        # would otherwise abort, and a `valueOf` observing context would split `==` label lists.
+        map (
+          l:
+          let
+            name = builtins.unsafeDiscardStringContext l;
+          in
+          {
+            inherit name;
+            value = valueOf name;
+          }
+        ) labels
       );
     in
     if labels == [ ] then

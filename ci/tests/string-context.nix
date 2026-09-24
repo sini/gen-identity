@@ -83,4 +83,21 @@ in
       contextOnlyDuplicateRefused = true;
     };
   };
+
+  # LABEL position, as `valueOf` sees it — callers index by the label (`l: relata.${l}`), so the
+  # context-carrying label must never reach `valueOf`, or indexing aborts uncatchably and `==` label
+  # lists could mint apart through a `valueOf` that observes context.
+  flake.tests.string-context.test-label-context-never-reaches-valueOf = {
+    expr = {
+      controlLabelsEqual = [ "x${z}" ] == [ "x" ];
+      valueOfSeesNoContext =
+        hashIdentity "k" [ "x${z}" ] builtins.hasContext == hashIdentity "k" [ "x" ] builtins.hasContext;
+      indexingIdiomMints = admits (hashIdentity "k" [ "x${z}" ] (l: { x = 1; }.${l}));
+    };
+    expected = {
+      controlLabelsEqual = true;
+      valueOfSeesNoContext = true;
+      indexingIdiomMints = true;
+    };
+  };
 }
