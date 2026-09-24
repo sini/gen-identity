@@ -13,6 +13,18 @@
 # context-free twin, and no minted identity carries context (ADR-0016 ruling 4, inherited by
 # ADR-0034 over the whole admitted domain; `ci/tests/string-context.nix`).
 #
+# ★ A LAZY SOURCE PATH MINTS A PER-EVALUATION IDENTITY. Under lazy trees (Determinate Nix,
+# `lazy-trees = true`) a flake input's `outPath` renders as a virtual store path that is fresh in
+# every evaluation, and `==` compares that virtual text; so its identity, which follows `==`, is
+# consistent within one evaluation and differs across them. ADR-0016 ruling 5 makes that lawful:
+# the identity is internal addressing, and nothing durable may depend on it across evaluations.
+# ⇒ An identity minted over a lazy source path MUST NOT reach a derivation, a file, or any other
+# carrier that outlives the evaluation: measured, a derivation holding one gets a new drvPath in
+# every evaluation, so it is never cached, while upstream Nix shows the same identity every time.
+# ADR-0034's friction rider does not fire: the mint pays the design's price — ruling 4 holds in
+# both directions, ruling 5 admits the per-evaluation identity, no regime or excluded population
+# changes — and the change sits in this one authority, stated here rather than absorbed at a site.
+#
 # ★ THIS LIBRARY IS DEPENDENCY-FREE, AND THAT IS A MEASUREMENT RATHER THAN AN INTENTION. The
 # content below is `builtins` and nothing else: it evaluates with every substrate argument
 # poisoned, and `ci/tests/purity.nix` scans it for every substrate identifier — not merely for
@@ -222,15 +234,18 @@ let
     if d > identityDepth then
       throw "identity: value nests deeper than the identity depth bound"
     # A string's CONTEXT is not identity-bearing: `==` ignores it, and ruling 4 makes `==` the
-    # reference relation. The digest is context-free because `hashString` returns a fresh string, so
-    # no discard is owed here. The derivation exclusion below is a TYPE test on the value, for
-    # termination; a derivation's string form is a leaf and, inside the mint, reaches no store effect
-    # (`toJSON` and `hashString` perform none), so it mints as its text. That holds only here: a
-    # consumer keying an attrset by the INPUT string, not by the identity, still meets Nix's
-    # attribute-name refusal. That its `toJSON` IS its store path reaches the text alone, which the context-free
-    # twin shares, so it grounds no distinction by context.
+    # reference relation. The context is discarded HERE, at the leaf, as the kind and the labels
+    # discard it where they enter, so no preimage piece ever carries context. It is owed: under lazy
+    # trees `==` compares a lazy source path's virtual text, while `hashString` on a context-carrying
+    # argument devirtualises it to the real store path, copying the tree into the store. Without the
+    # discard, a string and its `==` twin would mint apart. The identity of a lazy source path is
+    # therefore per-evaluation, which ADR-0016 ruling 5 licenses (see the header). The derivation
+    # exclusion below is a TYPE test on the value, for termination; a derivation's string form is a
+    # leaf and, discarded here, reaches no store effect inside the mint, so it mints as its text. That
+    # holds only here: a consumer keying an attrset by the INPUT string, not by the identity, still
+    # meets Nix's attribute-name refusal.
     else if builtins.isString v then
-      emit b ("s" + builtins.toJSON v)
+      emit b ("s" + builtins.toJSON (builtins.unsafeDiscardStringContext v))
     else if builtins.isBool v then
       emit b (if v then "b1" else "b0")
     else if builtins.isInt v then

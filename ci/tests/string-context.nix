@@ -10,8 +10,15 @@
 # A NON-STRING label is not a context question: it is refused by name before any discard can coerce
 # it (`{ outPath = "x"; }` would otherwise read as "x"). That refusal's message is pinned in
 # ../tests-error.nix, because a throwing `expr` cannot live under ./tests.
+#
+# A LAZY SOURCE PATH is the case the derivation fixture cannot reach. Under lazy trees (Determinate
+# Nix, `lazy-trees = true`) a flake input's `outPath` renders as a virtual store path, fresh per
+# evaluation, and `==` compares that virtual text, while `hashString` on a context-carrying argument
+# devirtualises it. The lazy cell is green on upstream Nix whatever the mint does: only a lazy-trees
+# evaluator discriminates it, and CI runs one.
 {
   genIdentity,
+  inputs,
   ...
 }:
 let
@@ -28,6 +35,9 @@ let
   plain = builtins.unsafeDiscardStringContext ctx;
   # An EMPTY string carrying the same context, for positions where the TEXT must stay fixed.
   z = builtins.substring 0 0 ctx;
+  # A flake input's source path: a lazy mount when this flake is evaluated with lazy trees.
+  src = inputs.gen-harness.outPath;
+  srcTwin = builtins.unsafeDiscardStringContext src;
 in
 {
   # VALUE position — the digest is context-free (`hashString` returns a fresh string).
@@ -39,6 +49,27 @@ in
       nestedSameIdentity = idOf { a = [ ctx ]; } == idOf { a = [ plain ]; };
       identityCarriesNoContext = !(builtins.hasContext (idOf ctx));
       # CONTROL: the comparator can tell identities apart.
+      controlSeparates = idOf "a" != idOf "b";
+    };
+    expected = {
+      controlFixtureCarriesContext = true;
+      controlTwinsAreEqual = true;
+      sameIdentity = true;
+      nestedSameIdentity = true;
+      identityCarriesNoContext = true;
+      controlSeparates = true;
+    };
+  };
+
+  # VALUE position, lazy source path — the mint discards context at the leaf, so the digest sees the
+  # text `==` compares rather than the devirtualised path `hashString` would substitute.
+  flake.tests.string-context-lazy.test-source-path-mints-as-its-eq-twin = {
+    expr = {
+      controlFixtureCarriesContext = builtins.hasContext src;
+      controlTwinsAreEqual = src == srcTwin;
+      sameIdentity = idOf src == idOf srcTwin;
+      nestedSameIdentity = idOf { a = [ src ]; } == idOf { a = [ srcTwin ]; };
+      identityCarriesNoContext = !(builtins.hasContext (idOf src));
       controlSeparates = idOf "a" != idOf "b";
     };
     expected = {
