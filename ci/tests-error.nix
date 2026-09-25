@@ -32,7 +32,7 @@ in
       ] (_: 1);
       expectedError = {
         type = "ThrownError";
-        msg = "^identity: a set as an identity-key label; a label is a string$";
+        msg = "^identity: a set as an identity-key label; a label is a string; kind \"k\"$";
       };
     };
   };

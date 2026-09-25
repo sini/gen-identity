@@ -54,7 +54,11 @@ than blocked case by case — a string can never render as a list, because its r
 body, so no preimage over one can be total), a path (`toJSON` on a file path silently copies it
 to the store), a derivation (its output attribute is self-referential, so an unbounded walk does
 not terminate), a float outside `|v| < 2^53`, a non-string or empty kind, a kind containing `:`,
-zero labels, a non-string label, and a duplicate label.
+zero labels, a non-string label, and a duplicate label. A refusal raised after the kind passes
+its guards names the kind, and inside a label's walk the label too
+(`identity: a lambda in an identity position; kind "attaches", label "entity"`). It never
+renders the rejected value, so describing a refusal reads no caller data; `--show-trace`
+locates the position inside the value.
 
 **Bounded on three axes.** Preimage LENGTH and walk DEPTH are declared bounds; BREADTH is
 answered by forcing both fold accumulator fields at every step, which is what makes the length
@@ -73,9 +77,11 @@ nix repl --impure --file ci/repl.nix
 and `nix flake check ./ci` are unguarded: they read a git-filtered copy of the tree, so an untracked
 cell is silently absent and the run stays green.
 
-67 cells across three suites: `identity-encoding` (the laws, the domain, the forgery arms, both
-boundary straddles), `purity` (the dependency-free invariant, with its two controls), `surface`
-(the export pin). `testsError` (`ci/tests-error.nix`) holds 2 more that pin a refusal's message.
+75 cells across five suites: `identity-encoding` (the laws, the domain, the forgery arms, both
+boundary straddles), `purity` (the dependency-free invariant, with its two controls),
+`string-context`, `surface` (the export pin), and `refusal-attribution` (golden digests over
+hand-written preimages, and catchability). `testsError` holds 12 more that pin a refusal's
+message: 2 in `ci/tests-error.nix` and 10 in `ci/tests/refusal-attribution.nix`.
 
 ## Theory
 

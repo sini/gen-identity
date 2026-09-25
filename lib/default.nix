@@ -143,167 +143,196 @@ let
   identityBudget = 65536;
   identityDepth = 512;
 
-  # Emit one rendered fragment against the REMAINING PREIMAGE CHARACTERS. Exhaustion is a refusal
-  # by name, so a refusal costs the budget rather than the expansion it declined to build.
-  emit =
-    b: str:
+  # The encoder is INSTANTIATED PER LABEL, closing over that label's refusal FRAME (the kind and
+  # the label), so every refusal raised inside a label's walk, the budget refusal in `emit`
+  # included, names both without an argument threaded through the walk. A threaded argument is one
+  # more application per value node on the success path; a closure is paid once per label and
+  # never per node. The frame is only ever read inside a `throw`, so building it costs nothing
+  # until a refusal fires. It is built from the kind and the label alone, both strings that have
+  # already passed their guards: a refusal never reads caller data to describe it, because a read
+  # that fails in a way `tryEval` does not contain would turn a named refusal into an abort.
+  # What a refusal names: the kind and, inside a label's walk, the label. Both are strings that have
+  # passed their guards, and `toJSON` is total on a string. Only ever called inside a `throw`.
+  frameOf =
+    kind: label:
+    "; kind ${builtins.toJSON (builtins.unsafeDiscardStringContext kind)}"
+    + (if label == null then "" else ", label ${builtins.toJSON label}");
+  # Called only inside the duplicate-key `throw`, after every label has passed the string guard.
+  dupOf =
+    labels:
     let
-      rest = b - builtins.stringLength str;
+      names = map builtins.unsafeDiscardStringContext labels;
     in
-    if rest < 0 then
-      throw "identity: preimage exceeds the identity budget"
-    else
-      {
-        s = str;
-        b = rest;
-      };
+    builtins.head (builtins.filter (l: builtins.length (builtins.filter (x: x == l) names) > 1) names);
 
-  # A composite renders as an opening tag, one member fragment per member each followed by the
-  # separator, and a closing tag — with the budget THREADED through every step. Threading is why
-  # the encoder and the bound are ONE mechanism and not two: a plain map-fold cannot carry state
-  # and therefore cannot carry the bound.
-  #
-  # ★★ BOTH ACCUMULATOR FIELDS ARE FORCED AT EVERY STEP, AND THAT IS WHAT BOUNDS BREADTH — the
-  # third axis, which neither the length budget nor the depth bound reaches on its own.
-  #
-  # `foldl'` forces the accumulator to WHNF, and it is easy to read that as "the fold is strict".
-  # It is not strict in what matters here: the accumulator is an attrset LITERAL, so it is ALREADY
-  # in WHNF and forcing it does nothing to its fields. What the fold leaves behind is TWO chains of
-  # unforced thunks, one link per member — the threaded budget and the accumulated concatenation.
-  # Nothing examines either until the walk is over, so a WIDE value escapes both bounds: forcing an
-  # n-link concatenation chain recurses n frames into the C stack and OVERFLOWS UNCATCHABLY.
-  # Measured before this forcing: a 31,000-element list — preimage 62,009 characters, inside the
-  # budget, and depth 2, inside the depth bound — aborted with `stack overflow`, escaping `tryEval`;
-  # so did a list whose preimage was over budget, because the budget was still a thunk when the
-  # stack ran out.
-  #
-  # Forcing both fields per round is ADR-0022's own probe constraint arriving in the identity
-  # domain: every round-loop accumulator field is forced per round, so state cannot accrete as a
-  # thunk chain the loop never inspects. It also makes the LENGTH bound honest — the budget is now
-  # spent AS the walk proceeds, so a refusal fires at the member that exhausts it rather than after
-  # the whole expansion has been described.
-  encodeComposite =
-    b: open: close: renderMember: members:
+  mkEncoder =
+    kind: label:
     let
-      opened = emit b open;
-      stepped = builtins.foldl' (
-        acc: m:
+      # Emit one rendered fragment against the REMAINING PREIMAGE CHARACTERS. Exhaustion is a refusal
+      # by name, so a refusal costs the budget rather than the expansion it declined to build.
+      emit =
+        b: str:
         let
-          rendered = renderMember acc.b m;
-          separated = emit rendered.b ",";
-          s = acc.s + rendered.s + separated.s;
-          b = separated.b;
+          rest = b - builtins.stringLength str;
         in
-        # Both fields, both flat values: a string and an int, so WHNF is full evaluation and no
-        # deep force is owed.
-        #
-        # ★ THE TWO ARE NOT SYMMETRIC, AND SAYING THEY WERE OVERSTATED THE SECOND. `seq s` is the
-        # load-bearing one: forcing the string forces `separated.s`, which is an `emit` result, and
-        # `emit` cannot produce its string without first computing `rest` and testing `rest < 0` —
-        # so the budget is dragged along transitively. Measured, one variant per arm: `seq s` ALONE
-        # mints a 31,000-member value; `seq b` alone and neither both abort uncatchably. `seq b` is
-        # therefore belt-and-braces over a chain `seq s` already collapses. It is kept because the
-        # transitive argument depends on `emit`'s internals, and a future `emit` that produced its
-        # string without consulting the budget would silently un-bound this axis — the redundant
-        # force errs in the safe direction and costs one already-forced int.
-        builtins.seq s (builtins.seq b { inherit s b; })
-      ) { inherit (opened) s b; } members;
-      closed = emit stepped.b close;
-    in
-    {
-      s = stepped.s + closed.s;
-      b = closed.b;
-    };
-
-  # One field of a record: the JSON-rendered key, a colon, then the field's own encoding. Shared by
-  # the caller-data walk and by the mint's own outer frame below, so ONE record grammar exists.
-  encodeField =
-    d: b: v: k:
-    let
-      key = emit b (builtins.toJSON k + ":");
-      val = canonicalEncode d key.b v.${k};
-    in
-    {
-      s = key.s + val.s;
-      b = val.b;
-    };
-
-  # canonicalEncode : depth -> budget -> value -> { s; b; }
-  canonicalEncode =
-    d: b: v:
-    if d > identityDepth then
-      throw "identity: value nests deeper than the identity depth bound"
-    # A string's CONTEXT is not identity-bearing: `==` ignores it, and ruling 4 makes `==` the
-    # reference relation. The context is discarded HERE, at the leaf, as the kind and the labels
-    # discard it where they enter, so no preimage piece ever carries context. It is owed: under lazy
-    # trees `==` compares a lazy source path's virtual text, while `hashString` on a context-carrying
-    # argument devirtualises it to the real store path, copying the tree into the store. Without the
-    # discard, a string and its `==` twin would mint apart. The identity of a lazy source path is
-    # therefore per-evaluation, which ADR-0016 ruling 5 licenses (see the header). The derivation
-    # exclusion below is a TYPE test on the value, for termination; a derivation's string form is a
-    # leaf and, discarded here, reaches no store effect inside the mint, so it mints as its text. That
-    # holds only here: a consumer keying an attrset by the INPUT string, not by the identity, still
-    # meets Nix's attribute-name refusal.
-    else if builtins.isString v then
-      emit b ("s" + builtins.toJSON (builtins.unsafeDiscardStringContext v))
-    else if builtins.isBool v then
-      emit b (if v then "b1" else "b0")
-    else if builtins.isInt v then
-      emit b ("i" + builtins.toString v)
-    else if builtins.isFloat v then
-      (
-        if !(v > (0.0 - exactBound) && v < exactBound) then
-          throw "identity: float outside the exactly-representable integer range"
-        else if v == builtins.floor v then
-          emit b ("i" + builtins.toString (builtins.floor v))
+        if rest < 0 then
+          throw "identity: preimage exceeds the identity budget${frameOf kind label}"
         else
-          emit b ("f" + builtins.toJSON v)
-      )
-    else if v == null then
-      emit b "z"
-    else if builtins.isList v then
-      encodeComposite b "[" "]" (b': x: canonicalEncode (d + 1) b' x) v
-    else if builtins.isAttrs v then
-      # A DERIVATION IS REFUSED BY TYPE TEST, BEFORE ANY DESCENT. A derivation's output attribute is
-      # self-referential (`drv.out.out.out.name` resolves), so an unbounded walk over one does not
-      # terminate. This gate exists for TERMINATION and not for forgery — the tagged encoding
-      # already closes the `outPath` channel.
+          {
+            s = str;
+            b = rest;
+          };
+
+      # A composite renders as an opening tag, one member fragment per member each followed by the
+      # separator, and a closing tag — with the budget THREADED through every step. Threading is why
+      # the encoder and the bound are ONE mechanism and not two: a plain map-fold cannot carry state
+      # and therefore cannot carry the bound.
       #
-      # ★★ THE TEST IS THE FULL THREE-ATTRIBUTE SHAPE, AND THE NARROWER FORM WAS DISCONTINUOUS UNDER
-      # NESTING. Testing `type` alone refuses any record whose `type` field happens to hold the
-      # string "derivation" — an ordinary declaration, since a `str` option may be named anything.
-      # That made ADMISSIBILITY DEPEND ON POSITION rather than on the value: measured, the record
-      # `{ type = "derivation"; n = 1; }` MINTED as the mint's own outer frame and REFUSED one level
-      # down, with the same shape carrying `type = "ordinary"` minting at both. Position-dependent
-      # admissibility is what ADR-0034's "inert composites are admitted" cannot survive, so the
-      # population it applies to had to shrink.
+      # ★★ BOTH ACCUMULATOR FIELDS ARE FORCED AT EVERY STEP, AND THAT IS WHAT BOUNDS BREADTH — the
+      # third axis, which neither the length budget nor the depth bound reaches on its own.
       #
-      # ★ IT SHRANK; IT DID NOT VANISH, and the residue is stated rather than left to be found. The
-      # mint's outer FRAME never reaches this gate at all — it is synthesized by the mint and is not
-      # caller data — so a record of the full three-attribute shape STILL mints at the frame while
-      # refusing everywhere caller data can put it. `test-derivation-shape-refused-wherever-caller-
-      # data-reaches` pins exactly that, frame arm included. What changed is which values sit in the
-      # discontinuous population: it was every record whose `type` field held a string, which is an
-      # ordinary declaration, and it is now only the full derivation shape, which no kind declares
-      # by accident. The remaining discontinuity errs toward MINTING a synthesized frame rather than
-      # refusing a legitimate value, which is the direction that costs an identity nothing.
+      # `foldl'` forces the accumulator to WHNF, and it is easy to read that as "the fold is strict".
+      # It is not strict in what matters here: the accumulator is an attrset LITERAL, so it is ALREADY
+      # in WHNF and forcing it does nothing to its fields. What the fold leaves behind is TWO chains of
+      # unforced thunks, one link per member — the threaded budget and the accumulated concatenation.
+      # Nothing examines either until the walk is over, so a WIDE value escapes both bounds: forcing an
+      # n-link concatenation chain recurses n frames into the C stack and OVERFLOWS UNCATCHABLY.
+      # Measured before this forcing: a 31,000-element list — preimage 62,009 characters, inside the
+      # budget, and depth 2, inside the depth bound — aborted with `stack overflow`, escaping `tryEval`;
+      # so did a list whose preimage was over budget, because the budget was still a thunk when the
+      # stack ran out.
       #
-      # Requiring `drvPath` and `outPath` alongside `type` costs no termination guarantee: what does
-      # not terminate is the self-referential output attribute, and a record carrying all three
-      # WITHOUT that structure is finite and bounded like any other. The three-attribute shape is
-      # what an actual derivation has, so every value the gate exists to stop is still stopped.
-      # Presence tests do not force, so widening the gate forces nothing new either.
-      if (v.type or null) == "derivation" && v ? drvPath && v ? outPath then
-        throw "identity: a derivation in an identity position"
-      else
-        encodeComposite b "{" "}" (b': k: encodeField (d + 1) b' v k) (builtins.attrNames v)
-    else
-      # Lambdas and paths land here, named by their own type. A lambda has no eliminator in Nix — no
-      # builtin exposes a closure's captured environment or its body — so no preimage over one can
-      # be TOTAL, and an identity minted over a partial preimage merges behaviourally distinct
-      # values. A path is refused because `toJSON` on a file path silently copies it to the store
-      # and on a directory path aborts uncatchably.
-      throw "identity: a ${builtins.typeOf v} in an identity position";
+      # Forcing both fields per round is ADR-0022's own probe constraint arriving in the identity
+      # domain: every round-loop accumulator field is forced per round, so state cannot accrete as a
+      # thunk chain the loop never inspects. It also makes the LENGTH bound honest — the budget is now
+      # spent AS the walk proceeds, so a refusal fires at the member that exhausts it rather than after
+      # the whole expansion has been described.
+      encodeComposite =
+        b: open: close: renderMember: members:
+        let
+          opened = emit b open;
+          stepped = builtins.foldl' (
+            acc: m:
+            let
+              rendered = renderMember acc.b m;
+              separated = emit rendered.b ",";
+              s = acc.s + rendered.s + separated.s;
+              b = separated.b;
+            in
+            # Both fields, both flat values: a string and an int, so WHNF is full evaluation and no
+            # deep force is owed.
+            #
+            # ★ THE TWO ARE NOT SYMMETRIC, AND SAYING THEY WERE OVERSTATED THE SECOND. `seq s` is the
+            # load-bearing one: forcing the string forces `separated.s`, which is an `emit` result, and
+            # `emit` cannot produce its string without first computing `rest` and testing `rest < 0` —
+            # so the budget is dragged along transitively. Measured, one variant per arm: `seq s` ALONE
+            # mints a 31,000-member value; `seq b` alone and neither both abort uncatchably. `seq b` is
+            # therefore belt-and-braces over a chain `seq s` already collapses. It is kept because the
+            # transitive argument depends on `emit`'s internals, and a future `emit` that produced its
+            # string without consulting the budget would silently un-bound this axis — the redundant
+            # force errs in the safe direction and costs one already-forced int.
+            builtins.seq s (builtins.seq b { inherit s b; })
+          ) { inherit (opened) s b; } members;
+          closed = emit stepped.b close;
+        in
+        {
+          s = stepped.s + closed.s;
+          b = closed.b;
+        };
+
+      # One field of a record: the JSON-rendered key, a colon, then the field's own encoding. Shared by
+      # the caller-data walk and by the mint's own outer frame below, so ONE record grammar exists.
+      encodeField =
+        d: b: v: k:
+        let
+          key = emit b (builtins.toJSON k + ":");
+          val = canonicalEncode d key.b v.${k};
+        in
+        {
+          s = key.s + val.s;
+          b = val.b;
+        };
+
+      # canonicalEncode : depth -> budget -> value -> { s; b; }
+      canonicalEncode =
+        d: b: v:
+        if d > identityDepth then
+          throw "identity: value nests deeper than the identity depth bound${frameOf kind label}"
+        # A string's CONTEXT is not identity-bearing: `==` ignores it, and ruling 4 makes `==` the
+        # reference relation. The context is discarded HERE, at the leaf, as the kind and the labels
+        # discard it where they enter, so no preimage piece ever carries context. It is owed: under lazy
+        # trees `==` compares a lazy source path's virtual text, while `hashString` on a context-carrying
+        # argument devirtualises it to the real store path, copying the tree into the store. Without the
+        # discard, a string and its `==` twin would mint apart. The identity of a lazy source path is
+        # therefore per-evaluation, which ADR-0016 ruling 5 licenses (see the header). The derivation
+        # exclusion below is a TYPE test on the value, for termination; a derivation's string form is a
+        # leaf and, discarded here, reaches no store effect inside the mint, so it mints as its text. That
+        # holds only here: a consumer keying an attrset by the INPUT string, not by the identity, still
+        # meets Nix's attribute-name refusal.
+        else if builtins.isString v then
+          emit b ("s" + builtins.toJSON (builtins.unsafeDiscardStringContext v))
+        else if builtins.isBool v then
+          emit b (if v then "b1" else "b0")
+        else if builtins.isInt v then
+          emit b ("i" + builtins.toString v)
+        else if builtins.isFloat v then
+          (
+            if !(v > (0.0 - exactBound) && v < exactBound) then
+              throw "identity: float outside the exactly-representable integer range${frameOf kind label}"
+            else if v == builtins.floor v then
+              emit b ("i" + builtins.toString (builtins.floor v))
+            else
+              emit b ("f" + builtins.toJSON v)
+          )
+        else if v == null then
+          emit b "z"
+        else if builtins.isList v then
+          encodeComposite b "[" "]" (b': x: canonicalEncode (d + 1) b' x) v
+        else if builtins.isAttrs v then
+          # A DERIVATION IS REFUSED BY TYPE TEST, BEFORE ANY DESCENT. A derivation's output attribute is
+          # self-referential (`drv.out.out.out.name` resolves), so an unbounded walk over one does not
+          # terminate. This gate exists for TERMINATION and not for forgery — the tagged encoding
+          # already closes the `outPath` channel.
+          #
+          # ★★ THE TEST IS THE FULL THREE-ATTRIBUTE SHAPE, AND THE NARROWER FORM WAS DISCONTINUOUS UNDER
+          # NESTING. Testing `type` alone refuses any record whose `type` field happens to hold the
+          # string "derivation" — an ordinary declaration, since a `str` option may be named anything.
+          # That made ADMISSIBILITY DEPEND ON POSITION rather than on the value: measured, the record
+          # `{ type = "derivation"; n = 1; }` MINTED as the mint's own outer frame and REFUSED one level
+          # down, with the same shape carrying `type = "ordinary"` minting at both. Position-dependent
+          # admissibility is what ADR-0034's "inert composites are admitted" cannot survive, so the
+          # population it applies to had to shrink.
+          #
+          # ★ IT SHRANK; IT DID NOT VANISH, and the residue is stated rather than left to be found. The
+          # mint's outer FRAME never reaches this gate at all — it is synthesized by the mint and is not
+          # caller data — so a record of the full three-attribute shape STILL mints at the frame while
+          # refusing everywhere caller data can put it. `test-derivation-shape-refused-wherever-caller-
+          # data-reaches` pins exactly that, frame arm included. What changed is which values sit in the
+          # discontinuous population: it was every record whose `type` field held a string, which is an
+          # ordinary declaration, and it is now only the full derivation shape, which no kind declares
+          # by accident. The remaining discontinuity errs toward MINTING a synthesized frame rather than
+          # refusing a legitimate value, which is the direction that costs an identity nothing.
+          #
+          # Requiring `drvPath` and `outPath` alongside `type` costs no termination guarantee: what does
+          # not terminate is the self-referential output attribute, and a record carrying all three
+          # WITHOUT that structure is finite and bounded like any other. The three-attribute shape is
+          # what an actual derivation has, so every value the gate exists to stop is still stopped.
+          # Presence tests do not force, so widening the gate forces nothing new either.
+          if (v.type or null) == "derivation" && v ? drvPath && v ? outPath then
+            throw "identity: a derivation in an identity position${frameOf kind label}"
+          else
+            encodeComposite b "{" "}" (b': k: encodeField (d + 1) b' v k) (builtins.attrNames v)
+        else
+          # Lambdas and paths land here, named by their own type. A lambda has no eliminator in Nix — no
+          # builtin exposes a closure's captured environment or its body — so no preimage over one can
+          # be TOTAL, and an identity minted over a partial preimage merges behaviourally distinct
+          # values. A path is refused because `toJSON` on a file path silently copies it to the store
+          # and on a directory path aborts uncatchably.
+          throw "identity: a ${builtins.typeOf v} in an identity position${frameOf kind label}";
+    in
+    {
+      inherit encodeComposite encodeField;
+    };
 
   # The PAIRS preimage — a digest of the ⟨label, value⟩ pairs alone. The kind is NOT in it; it rides
   # outside, on the join in `hashIdentity`.
@@ -325,7 +354,7 @@ let
   # identity it is entitled to. The frame is not caller data; its FIELDS are, and those take the
   # full walk from depth 1.
   canonicalPreimage =
-    labels: valueOf:
+    kind: labels: valueOf:
     let
       pairs = builtins.listToAttrs (
         # A label's context is discarded (ruling 4): `listToAttrs` aborts uncatchably on a context-
@@ -347,17 +376,19 @@ let
       );
     in
     if labels == [ ] then
-      throw "identity: zero identity keys"
+      throw "identity: zero identity keys${frameOf kind null}"
     # Before `listToAttrs` is forced: its own type failure on a non-string name escapes `tryEval`.
     else if !builtins.all builtins.isString labels then
       throw "identity: a ${
         builtins.typeOf (builtins.head (builtins.filter (l: !builtins.isString l) labels))
-      } as an identity-key label; a label is a string"
+      } as an identity-key label; a label is a string${frameOf kind null}"
     else if builtins.length labels != builtins.length (builtins.attrNames pairs) then
-      throw "identity: duplicate identity key"
+      throw "identity: duplicate identity key ${builtins.toJSON (dupOf labels)}${frameOf kind null}"
     else
-      (encodeComposite identityBudget "{" "}" (b: k: encodeField 1 b pairs k) (builtins.attrNames pairs))
-      .s;
+      # The mint's own frame names the kind; each label's walk runs in that label's own instance.
+      ((mkEncoder kind null).encodeComposite identityBudget "{" "}" (
+        b: k: (mkEncoder kind k).encodeField 1 b pairs k
+      ) (builtins.attrNames pairs)).s;
 
   # The SINGLE minting authority. An identity is the kind tag joined to a digest of the pairs:
   #
@@ -391,7 +422,7 @@ let
     # reaches here — the guards above must stay first, or the discard would coerce a set.
     else
       "${builtins.unsafeDiscardStringContext kind}:"
-      + builtins.hashString "sha256" (canonicalPreimage labels valueOf);
+      + builtins.hashString "sha256" (canonicalPreimage kind labels valueOf);
 in
 {
   inherit hashIdentity;
