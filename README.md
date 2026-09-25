@@ -63,10 +63,15 @@ budget bite on that axis at all. Exhausting any of them is a refusal by name, ne
 ## Testing
 
 ```bash
-nix-unit --flake ./ci#tests
-nix-unit --flake ./ci#testsError
+nix develop ./ci --command ci                # the suites, guarded
+nix develop ./ci --command ci --tests-error  # the error-plane cells, guarded
 nix repl --impure --file ci/repl.nix
 ```
+
+`ci` refuses when anything under a declared read root is unknown to git — any extension or name,
+`_`-prefixed included — and the remedy is `git add` or a move. The bare `nix-unit --flake ./ci#tests`
+and `nix flake check ./ci` are unguarded: they read a git-filtered copy of the tree, so an untracked
+cell is silently absent and the run stays green.
 
 67 cells across three suites: `identity-encoding` (the laws, the domain, the forgery arms, both
 boundary straddles), `purity` (the dependency-free invariant, with its two controls), `surface`
