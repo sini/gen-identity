@@ -22,8 +22,8 @@ Zero dependencies — not nixpkgs, not any gen substrate. The `lib` output is a 
     let inherit (gen-identity.lib) hashIdentity; in
     {
       # kind -> [label] -> (label -> value) -> "<kind>:<sha256hex>"
-      id = hashIdentity "host" [ "name" "system" ] (k: { name = "igloo"; system = "x86_64-linux"; }.${k});
-      # → "host:9d5cc671…"
+      id = hashIdentity "bobbin" [ "name" "thread" ] (k: { name = "lark"; thread = "linen"; }.${k});
+      # → "bobbin:9e7fccd3…"
     };
 }
 ```
