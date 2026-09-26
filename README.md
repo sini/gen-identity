@@ -101,4 +101,4 @@ a comment block belongs to the code it documents.
 | [gen-prelude](https://github.com/sini/gen-prelude)   | Pure nixpkgs-lib-free utility base                                                                                                |
 | [gen-schema](https://github.com/sini/gen-schema)     | Typed record registry — and the identity **reflection** half: which of a kind's options are identity keys, and stamping `id_hash` |
 | [gen-types](https://github.com/sini/gen-types)       | Pure structural type checker                                                                                                      |
-| [gen-algebra](https://github.com/sini/gen-algebra)   | Search monad, records, intensional functions, either                                                                              |
+| [gen-algebra](https://github.com/sini/gen-algebra)   | Records, intensional functions, either                                                                                            |
