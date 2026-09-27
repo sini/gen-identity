@@ -36,18 +36,9 @@ question lands — a hazard its name makes larger rather than smaller.
 Entry: `inputs.gen-identity.lib` (flake), or `import ./.` — the same **bare value**, not a
 function, so it takes no dependency argument.
 
-| Binding         | Signature                                                     |
-| --------------- | ------------------------------------------------------------- |
-| `hashIdentity`  | `kind -> [label] -> (label -> value) -> "<kind>:<sha256hex>"` |
-| `checkOptions`  | `door -> [name] -> opts -> opts` (closed; unknown refused)    |
-| `checkRequired` | `door -> [name] -> record -> record` (open; missing refused)  |
-| `resolve`       | `door -> { kind; keys; entries; hint ? }  -> ref -> id`       |
-
-The last three are the door constructs of den-hoag-7gp66 P1: every published door shares them, and
-every refusal they raise reads `<door>: … (in identity.<construct>)`. `resolve` takes a reference
-written either way — an identifier (a string) or a declaration value — and answers the identifier;
-a declaration is a member when its identity, re-minted from its key values under the registry's
-kind, is a canonical entry's. Contract and cells: `lib/default.nix`, `ci/tests/door.nix`.
+| Binding        | Signature                                                     |
+| -------------- | ------------------------------------------------------------- |
+| `hashIdentity` | `kind -> [label] -> (label -> value) -> "<kind>:<sha256hex>"` |
 
 **That is the whole surface**, pinned by contents in `ci/tests/surface.nix`.
 
@@ -106,10 +97,10 @@ nix eval --json .#lib --apply builtins.attrNames
 Current output (verbatim):
 
 ```json
-["checkOptions","checkRequired","hashIdentity","resolve"]
+["hashIdentity"]
 ```
 
-A four-name list is the claim rather than a truncated check. `canonicalEncode` and the bounds
+A one-name list is the claim rather than a truncated check. `canonicalEncode` and the bounds
 beneath it are internal **by decision** (see *When the encoder publishes*), and
 `ci/tests/surface.nix` pins the surface by contents — so a second name appearing in this block is
 the drift, not the fix.
