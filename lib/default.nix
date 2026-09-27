@@ -423,7 +423,151 @@ let
     else
       "${builtins.unsafeDiscardStringContext kind}:"
       + builtins.hashString "sha256" (canonicalPreimage kind labels valueOf);
+
+  # ── THE DOOR CONSTRUCTS (den-hoag-7gp66 P1) ──
+  #
+  # Three checks every published door shares, so there is ONE definition of each: the closed
+  # options set and the open data record (R5), and the reference resolver (R1). Each takes the
+  # published name of the door the caller invoked as its FIRST argument and every refusal reads
+  # `<door>: … (in identity.<check>)`, so a refusal names the door and the check is secondary
+  # detail (R6). Each refusal is a `throw`, so `tryEval` contains it (ADR-0025 item 1): a native
+  # closed formal or a missing native required formal aborts past `tryEval`, which is why a door
+  # takes `...` formals and calls one of these instead.
+  #
+  # They live beside the mint because the resolver decides membership BY MINTING: one home for the
+  # three rather than one per check, so a door wanting both a check and the resolver takes one edge.
+  quote = names: builtins.concatStringsSep ", " (map (n: "'${n}'") names);
+
+  # `checkOptions door accepted opts` — an options set is CLOSED: every field is optional, and a
+  # field outside `accepted` is refused by name with the accepted set named. A pass-through, so it
+  # cannot be written and then not called. The argument's type is refused before `attrNames` sees
+  # it, because `attrNames` on a non-set aborts past `tryEval`.
+  checkOptions =
+    door: accepted: opts:
+    if !builtins.isAttrs opts then
+      throw "${door}: the options must be an attrset, not a ${builtins.typeOf opts} (accepted: ${quote accepted}) (in identity.checkOptions)"
+    else
+      let
+        unknown = builtins.filter (f: !builtins.elem f accepted) (builtins.attrNames opts);
+      in
+      if unknown == [ ] then
+        opts
+      else
+        throw "${door}: '${builtins.head unknown}' is not an option of this door; the options are closed (accepted: ${quote accepted}) (in identity.checkOptions)";
+
+  # `checkRequired door required args` — a data record is OPEN (width subtyping, R5): a missing
+  # required field is refused by name, an extra field is admitted and never reported. That silence
+  # is R5's stated price, not an oversight.
+  checkRequired =
+    door: required: args:
+    if !builtins.isAttrs args then
+      throw "${door}: the argument must be an attrset, not a ${builtins.typeOf args} (required: ${quote required}) (in identity.checkRequired)"
+    else
+      let
+        missing = builtins.filter (f: !(args ? ${f})) required;
+      in
+      if missing == [ ] then
+        args
+      else
+        throw "${door}: required field '${builtins.head missing}' is missing (required: ${quote required}) (in identity.checkRequired)";
+
+  # `resolve door registry ref` — a reference, written either way, to its IDENTIFIER (R1).
+  #
+  #   registry = { kind; keys; entries; hint ? null; }
+  #
+  # `entries` maps each identifier to its CANONICAL entry; `kind` and `keys` are the mint's kind tag
+  # and identity-key labels for that registry's declarations.
+  #
+  # - An identifier (a STRING, and only a string: den-hoag-3w9e7 arm (a)) must name an entry.
+  # - A declaration (an attrset) is a member when its identity, RE-MINTED from its own key values,
+  #   is the identity of a canonical entry re-minted the same way. Membership is the mint's verdict:
+  #   no editable field of the value is ever trusted, a stamp included, so an edit that moves a key
+  #   value moves the identity and is refused. An edit to a field that is not an identity key does
+  #   not move it, and the value resolves to its entry's identifier — the door serves the entry,
+  #   never the value it was handed.
+  # - Anything else is refused by name.
+  #
+  # ★ THE KIND IS THE REGISTRY'S, NOT THE VALUE'S: a value carries no kind a caller cannot edit, so
+  # it is minted under the kind the door expects. A declaration of another kind whose key labels
+  # and values coincide with an entry's therefore resolves to that entry.
+  #
+  # ★ `hint` IS A LOCATOR, NEVER A VERDICT. It names a field whose value, on a member, is USUALLY its
+  # identifier. With it, the entry under that name is tried first, and on a miss only the entries
+  # whose own `hint` field agrees are minted; without it, every entry is minted once, into one
+  # index. The difference is RECURSION, not cost: an entry whose key value is computed through this
+  # same resolver cannot sit in an index that mints every entry, and `hint` keeps the mints to the
+  # candidates. Either way the verdict is the identity comparison. The price is fail-closed: a
+  # member whose `hint` field was edited is looked for among the wrong candidates and refused,
+  # never admitted as another entry, so a registry whose hint field is not an identity key pays it.
+  #
+  # Bind `resolve door registry` once and apply it per reference: the entry identities are
+  # memoized in that binding, so each entry mints at most once however many references resolve.
+  resolve =
+    door:
+    {
+      kind,
+      keys,
+      entries,
+      hint ? null,
+    }:
+    let
+      mint = v: hashIdentity kind keys (k: v.${k});
+      ids = builtins.mapAttrs (_: mint) entries;
+      byIdentity = builtins.listToAttrs (
+        map (id: {
+          name = ids.${id};
+          value = id;
+        }) (builtins.attrNames entries)
+      );
+      hintOf =
+        v:
+        if builtins.isString (v.${hint} or null) then
+          builtins.unsafeDiscardStringContext v.${hint}
+        else
+          null;
+      byHint = builtins.groupBy (id: hintOf entries.${id}) (
+        builtins.filter (id: hintOf entries.${id} != null) (builtins.attrNames entries)
+      );
+      refuse = msg: throw "${door}: ${msg} (in identity.resolve)";
+      declaration =
+        v:
+        let
+          absent = builtins.filter (k: !(v ? ${k})) keys;
+          minted = builtins.tryEval (mint v);
+          h = hintOf v;
+          candidates = builtins.filter (id: ids.${id} == minted.value) (
+            if h == null then [ ] else byHint.${h} or [ ]
+          );
+        in
+        if absent != [ ] then
+          refuse "the declaration lacks identity key '${builtins.head absent}' (keys: ${quote keys})"
+        else if !minted.success then
+          refuse "the declaration has no identity: a value under its keys (${quote keys}) does not mint"
+        else if hint == null then
+          byIdentity.${minted.value} or (refuse "the declaration is not a member of the registry")
+        else if h != null && entries ? ${h} && ids.${h} == minted.value then
+          h
+        else if candidates != [ ] then
+          builtins.head candidates
+        else
+          refuse "the declaration is not a member of the registry";
+    in
+    ref:
+    if builtins.isString ref then
+      let
+        id = builtins.unsafeDiscardStringContext ref;
+      in
+      if entries ? ${id} then id else refuse "reference '${id}' names no entry of the registry"
+    else if builtins.isAttrs ref then
+      declaration ref
+    else
+      refuse "expected an identifier (a string) or a declaration (an attrset), got a ${builtins.typeOf ref}";
 in
 {
-  inherit hashIdentity;
+  inherit
+    hashIdentity
+    checkOptions
+    checkRequired
+    resolve
+    ;
 }

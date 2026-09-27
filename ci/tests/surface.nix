@@ -1,6 +1,7 @@
 # The EXPORT SURFACE, pinned by contents.
 #
-# ★ ONE BINDING PUBLISHES: `hashIdentity`. The encoder beneath it — `canonicalEncode`,
+# ★ FOUR BINDINGS PUBLISH: the mint, `hashIdentity`, and the three door constructs beside it —
+# `checkOptions`, `checkRequired` and `resolve` (den-hoag-7gp66 P1; ./door.nix). The encoder beneath it — `canonicalEncode`,
 # `canonicalPreimage`, `emit`, `encodeComposite`, `encodeField` — and its two bound constants
 # stay INTERNAL, and that is a decision with a reason rather than an omission.
 #
@@ -24,9 +25,14 @@
 {
   flake.tests.surface = {
     # Pinned by CONTENTS, not by count: a count is satisfied by swapping one export for another.
-    test-exports-exactly-hashIdentity = {
+    test-exports-exactly-the-mint-and-the-door-constructs = {
       expr = builtins.attrNames genIdentity;
-      expected = [ "hashIdentity" ];
+      expected = [
+        "checkOptions"
+        "checkRequired"
+        "hashIdentity"
+        "resolve"
+      ];
     };
 
     # The published binding is the mint, not an accidental attrset that happens to be named.

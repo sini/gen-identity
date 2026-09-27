@@ -33,7 +33,11 @@ Without flakes: `import ./path/to/gen-identity` is a nullary function over the l
 
 ## The surface
 
-**One binding publishes.** `hashIdentity`. The encoder beneath it — `canonicalEncode`,
+**Four bindings publish.** The mint, `hashIdentity`, and beside it the three door constructs every
+published gen door shares (den-hoag-7gp66 P1): `checkOptions door accepted opts` (a closed options
+set), `checkRequired door required record` (an open data record) and `resolve door registry ref` (a
+reference, identifier or declaration value, to its identifier, membership decided by re-minting).
+Each refusal names the door first: `<door>: … (in identity.<construct>)`. The encoder beneath the mint — `canonicalEncode`,
 `canonicalPreimage`, `emit`, `encodeComposite`, `encodeField` — and its bound constants stay
 internal, and that is a decision rather than an omission: the raw encoder's signature threads a
 budget, so publishing it would hand a caller a second refusal policy over the same encoding,
