@@ -219,11 +219,14 @@ in
     # exit 0. This is the same shape as the manifest — an exact list, not a count — asked of a token
     # that is genuinely present rather than genuinely absent, so the reads are shown to carry this
     # repository's source and not a constant.
+    # `flake.nix` dropped out of this list at den-hoag-ydm94 R7: the root's `builtins.deepSeq (…
+    # typeOf …)` forcing construction was its only live `builtins` token, and retiring that
+    # construction (superseded by gen-harness's `checks.root-surface`) leaves this file's stripped
+    # code with no live token of its own.
     test-scan-reads-are-live = {
       expr = liveReads;
       expected = [
         "lib/default.nix"
-        "flake.nix"
       ];
     };
 
