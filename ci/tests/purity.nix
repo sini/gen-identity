@@ -34,7 +34,7 @@
 #
 # Scope: lib/**.nix + the root flake.nix + default.nix (the library and its entries). NOT ci/ —
 # the test harness legitimately uses the nixpkgs lib, including to run this scan.
-{ lib, ... }:
+{ genPrelude, lib, ... }:
 let
   libDir = ../../lib;
 
@@ -173,7 +173,7 @@ let
   # manifest, so a read returning one fixed text for every file lands outside it either way — without
   # the token the list collapses toward empty, with it the list swells to every source.
   liveToken = "builtins";
-  liveReads = map (src: src.name) (lib.filter (src: lib.hasInfix liveToken src.code) sources);
+  liveReads = map (src: src.name) (lib.filter (src: genPrelude.hasInfix liveToken src.code) sources);
 
   # scan : [ { name; code; } ] -> [ "file: 'tok'" ]. Factored out of `violations` so the detector
   # cell below runs THE SAME call over the same source list with one entry appended, rather than a
@@ -181,7 +181,8 @@ let
   scan =
     srcs:
     lib.concatMap (
-      src: map (tok: "${src.name}: '${tok}'") (lib.filter (tok: lib.hasInfix tok src.code) forbidden)
+      src:
+      map (tok: "${src.name}: '${tok}'") (lib.filter (tok: genPrelude.hasInfix tok src.code) forbidden)
     ) srcs;
 
   violations = scan sources;
@@ -306,7 +307,7 @@ in
     # file to grow one arrives as a red that has to be READ, exactly as a new library file arrives as a
     # red on a membership manifest.
     test-strip-premise-multiline-strings = {
-      expr = map (s: s.name) (lib.filter (s: lib.hasInfix "''" s.text) rawSources);
+      expr = map (s: s.name) (lib.filter (s: genPrelude.hasInfix "''" s.text) rawSources);
       expected = [ ];
     };
   };
