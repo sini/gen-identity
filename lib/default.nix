@@ -236,13 +236,19 @@ let
         # when the budget is threaded. The preimage is byte-identical either way,
         # so no identity moves, and a value is refused for length exactly when its preimage exceeds the
         # budget, since the outer frame charges the exact remainder. What the upper bound changes is
-        # confined to values that are REFUSED either way, and it is stated rather than left to be found:
+        # confined to values a threaded walk REFUSES, and it is stated rather than left to be found:
         #   - WHICH refusal names a value: one over budget that ALSO holds a lambda, path, derivation or
         #     depth refusal inside the member that crosses can name that refusal rather than the budget,
         #     because the member is walked against its upper bound before the fold charges it;
         #   - WHAT a refusal costs: up to about one budget of walked members per enclosing level, so
         #     `identityDepth × identityBudget` characters at worst rather than one budget — bounded,
-        #     and never the expansion the refusal declined to build.
+        #     and never the expansion the refusal declined to build;
+        #   - WHETHER a refusal is catchable: a value over budget that holds an `abort` or an infinite
+        #     recursion inside the member that crosses, past the point where a threaded walk would
+        #     already have refused, is walked as far as that thunk and aborts UNCATCHABLY where a
+        #     threaded walk refused by name. The same thunk inside the budget aborts under either walk,
+        #     and such a value is outside the inert domain the mint admits (ADR-0034); it is stated
+        #     because ADR-0025 item 1 owes every escape from `tryEval` a name.
         else if builtins.isList v || builtins.isAttrs v then
           let
             list = builtins.isList v;
