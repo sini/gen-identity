@@ -104,8 +104,8 @@ let
   # both declared bounds — a 31,000-element list is 62,009 preimage characters and two levels deep —
   # yet it escaped them both, because the fold accumulated the budget and the string as THUNK CHAINS
   # that nothing forced until the walk was over. The bounds were not too loose; they had not been
-  # EVALUATED. Breadth is answered in `encodeComposite`, by forcing both accumulator fields at every
-  # step, and the length budget then does the bounding: it caps member count as a consequence, since every
+  # EVALUATED. Breadth is answered in the composite fold, by forcing its accumulator and each member
+  # at every step, and the length budget then does the bounding: it caps member count as a consequence, since every
   # member emits at least its separator. Measured at this budget: 32,763 null members mint, 32,764
   # refuse BY NAME.
   #
@@ -116,24 +116,27 @@ let
   #
   # ★ The depth bound is not a free parameter: it owes `depth × calls-per-node < max-call-depth`,
   # and both factors are evaluator and implementation facts rather than encoding facts. MEASURED on
-  # this encoder, with the depth bound lifted and the budget as shipped: a thin chain mints in the
-  # low three thousands of levels and, a little above that, aborts UNCATCHABLY with
+  # this encoder, with the depth bound lifted and the budget as shipped: a thin RECORD chain mints a
+  # little under two thousand levels deep and, just above that, aborts UNCATCHABLY with
   # `stack overflow; max-call-depth exceeded` — Nix's own call-depth guard, configured at 10,000,
-  # and not a raw C-stack limit. That puts this encoder at ROUGHLY THREE Nix call frames per level,
-  # so the constraint reads 512 × 3 < 10,000 and the bound of 512 carries a measured margin of
-  # about 6×.
+  # and not a raw C-stack limit. That puts this encoder at ROUGHLY FIVE Nix call frames per record
+  # level (a list level is one fewer), so the constraint reads 512 × 5 < 10,000 and the bound of 512
+  # carries a measured margin of about 4×.
   #
   # ★ THE CROSSOVER IS AN INTERVAL AND MUST NOT BE WRITTEN AS A LEVEL. `max-call-depth` counts a
   # GLOBAL frame budget, not this walk's depth, so whatever else the surrounding evaluation is
-  # holding open moves the exact level: independent runs put it a few tens of levels apart. The two
-  # figures worth carrying are the STABLE ones — about three frames per level, and about a 6×
-  # margin behind the shipped bound — because those survive the harness moving underneath them.
+  # holding open moves the exact level. The two figures worth carrying are the STABLE ones — about
+  # five frames per level, and about a 4× margin behind the shipped bound — because those survive
+  # the harness moving underneath them.
   #
-  # ★ THAT MARGIN IS SMALLER THAN IT WAS, AND THE CAUSE IS THE BREADTH FIX ABOVE — recorded because
-  # the two are otherwise easy to reason about separately. Forcing each fold step makes the descent
-  # STRICT, which spends call frames where the lazy form deferred them: before the forcing the same
-  # walk survived past 5,120 levels. An implementation with a heavier per-node call count owes its
-  # own margin measurement rather than inheriting this one.
+  # ★ THAT MARGIN IS SMALLER THAN THE THREADED ENCODER'S, AND THE CAUSE IS RECORDED so the two are
+  # not reasoned about separately. The threaded encoder spent about three frames per level (a margin
+  # of about 6×), because each fold step returned a record and its string was concatenated without a
+  # call; the checked encoder forces each member inside the fold step that charges it, so the fold
+  # and its step hold frames across the descent. That is the price of building the preimage without
+  # a record per fragment. The composite branch is written to spend the fewest frames that ordering
+  # allows (see its comment); an implementation with a heavier per-node call count owes its own
+  # margin measurement rather than inheriting this one.
   #
   # ★ THE PRICE IS REAL AND IS NOT HIDDEN: a value with FEW DISTINCT NODES is refused when its
   # EXPANSION exceeds the budget, because what a walk pays is the expansion and not the node count.
@@ -144,7 +147,7 @@ let
   identityDepth = 512;
 
   # The encoder is INSTANTIATED PER LABEL, closing over that label's refusal FRAME (the kind and
-  # the label), so every refusal raised inside a label's walk, the budget refusal in `emit`
+  # the label), so every refusal raised inside a label's walk, the composite fold's budget refusal
   # included, names both without an argument threaded through the walk. A threaded argument is one
   # more application per value node on the success path; a closure is paid once per label and
   # never per node. The frame is only ever read inside a `throw`, so building it costs nothing
@@ -168,94 +171,11 @@ let
   mkEncoder =
     kind: label:
     let
-      # Emit one rendered fragment against the REMAINING PREIMAGE CHARACTERS. Exhaustion is a refusal
-      # by name, so a refusal costs the budget rather than the expansion it declined to build.
-      emit =
-        b: str:
-        let
-          rest = b - builtins.stringLength str;
-        in
-        if rest < 0 then
-          throw "identity: preimage exceeds the identity budget${frameOf kind label}"
-        else
-          {
-            s = str;
-            b = rest;
-          };
+      over = throw "identity: preimage exceeds the identity budget${frameOf kind label}";
 
-      # A composite renders as an opening tag, one member fragment per member each followed by the
-      # separator, and a closing tag — with the budget THREADED through every step. Threading is why
-      # the encoder and the bound are ONE mechanism and not two: a plain map-fold cannot carry state
-      # and therefore cannot carry the bound.
-      #
-      # ★★ BOTH ACCUMULATOR FIELDS ARE FORCED AT EVERY STEP, AND THAT IS WHAT BOUNDS BREADTH — the
-      # third axis, which neither the length budget nor the depth bound reaches on its own.
-      #
-      # `foldl'` forces the accumulator to WHNF, and it is easy to read that as "the fold is strict".
-      # It is not strict in what matters here: the accumulator is an attrset LITERAL, so it is ALREADY
-      # in WHNF and forcing it does nothing to its fields. What the fold leaves behind is TWO chains of
-      # unforced thunks, one link per member — the threaded budget and the accumulated concatenation.
-      # Nothing examines either until the walk is over, so a WIDE value escapes both bounds: forcing an
-      # n-link concatenation chain recurses n frames into the C stack and OVERFLOWS UNCATCHABLY.
-      # Measured before this forcing: a 31,000-element list — preimage 62,009 characters, inside the
-      # budget, and depth 2, inside the depth bound — aborted with `stack overflow`, escaping `tryEval`;
-      # so did a list whose preimage was over budget, because the budget was still a thunk when the
-      # stack ran out.
-      #
-      # Forcing both fields per round is ADR-0022's own probe constraint arriving in the identity
-      # domain: every round-loop accumulator field is forced per round, so state cannot accrete as a
-      # thunk chain the loop never inspects. It also makes the LENGTH bound honest — the budget is now
-      # spent AS the walk proceeds, so a refusal fires at the member that exhausts it rather than after
-      # the whole expansion has been described.
-      encodeComposite =
-        b: open: close: renderMember: members:
-        let
-          opened = emit b open;
-          stepped = builtins.foldl' (
-            acc: m:
-            let
-              rendered = renderMember acc.b m;
-              separated = emit rendered.b ",";
-              s = acc.s + rendered.s + separated.s;
-              b = separated.b;
-            in
-            # Both fields, both flat values: a string and an int, so WHNF is full evaluation and no
-            # deep force is owed.
-            #
-            # ★ THE TWO ARE NOT SYMMETRIC, AND SAYING THEY WERE OVERSTATED THE SECOND. `seq s` is the
-            # load-bearing one: forcing the string forces `separated.s`, which is an `emit` result, and
-            # `emit` cannot produce its string without first computing `rest` and testing `rest < 0` —
-            # so the budget is dragged along transitively. Measured, one variant per arm: `seq s` ALONE
-            # mints a 31,000-member value; `seq b` alone and neither both abort uncatchably. `seq b` is
-            # therefore belt-and-braces over a chain `seq s` already collapses. It is kept because the
-            # transitive argument depends on `emit`'s internals, and a future `emit` that produced its
-            # string without consulting the budget would silently un-bound this axis — the redundant
-            # force errs in the safe direction and costs one already-forced int.
-            builtins.seq s (builtins.seq b { inherit s b; })
-          ) { inherit (opened) s b; } members;
-          closed = emit stepped.b close;
-        in
-        {
-          s = stepped.s + closed.s;
-          b = closed.b;
-        };
-
-      # One field of a record: the JSON-rendered key, a colon, then the field's own encoding. Shared by
-      # the caller-data walk and by the mint's own outer frame below, so ONE record grammar exists.
-      encodeField =
-        d: b: v: k:
-        let
-          key = emit b (builtins.toJSON k + ":");
-          val = canonicalEncode d key.b v.${k};
-        in
-        {
-          s = key.s + val.s;
-          b = val.b;
-        };
-
-      # canonicalEncode : depth -> budget -> value -> { s; b; }
-      canonicalEncode =
-        d: b: v:
+      # enc : depth -> budget -> value -> string
+      enc =
+        d: r: v:
         if d > identityDepth then
           throw "identity: value nests deeper than the identity depth bound${frameOf kind label}"
         # A string's CONTEXT is not identity-bearing: `==` ignores it, and ruling 4 makes `==` the
@@ -270,58 +190,118 @@ let
         # holds only here: a consumer keying an attrset by the INPUT string, not by the identity, still
         # meets Nix's attribute-name refusal.
         else if builtins.isString v then
-          emit b ("s" + builtins.toJSON (builtins.unsafeDiscardStringContext v))
+          "s" + builtins.toJSON (builtins.unsafeDiscardStringContext v)
         else if builtins.isBool v then
-          emit b (if v then "b1" else "b0")
+          (if v then "b1" else "b0")
         else if builtins.isInt v then
-          emit b ("i" + builtins.toString v)
+          "i" + builtins.toString v
         else if builtins.isFloat v then
           (
             if !(v > (0.0 - exactBound) && v < exactBound) then
               throw "identity: float outside the exactly-representable integer range${frameOf kind label}"
             else if v == builtins.floor v then
-              emit b ("i" + builtins.toString (builtins.floor v))
+              "i" + builtins.toString (builtins.floor v)
             else
-              emit b ("f" + builtins.toJSON v)
+              "f" + builtins.toJSON v
           )
         else if v == null then
-          emit b "z"
-        else if builtins.isList v then
-          encodeComposite b "[" "]" (b': x: canonicalEncode (d + 1) b' x) v
-        else if builtins.isAttrs v then
-          # A DERIVATION IS REFUSED BY TYPE TEST, BEFORE ANY DESCENT. A derivation's output attribute is
-          # self-referential (`drv.out.out.out.name` resolves), so an unbounded walk over one does not
-          # terminate. This gate exists for TERMINATION and not for forgery — the tagged encoding
-          # already closes the `outPath` channel.
-          #
-          # ★★ THE TEST IS THE FULL THREE-ATTRIBUTE SHAPE, AND THE NARROWER FORM WAS DISCONTINUOUS UNDER
-          # NESTING. Testing `type` alone refuses any record whose `type` field happens to hold the
-          # string "derivation" — an ordinary declaration, since a `str` option may be named anything.
-          # That made ADMISSIBILITY DEPEND ON POSITION rather than on the value: measured, the record
-          # `{ type = "derivation"; n = 1; }` MINTED as the mint's own outer frame and REFUSED one level
-          # down, with the same shape carrying `type = "ordinary"` minting at both. Position-dependent
-          # admissibility is what ADR-0034's "inert composites are admitted" cannot survive, so the
-          # population it applies to had to shrink.
-          #
-          # ★ IT SHRANK; IT DID NOT VANISH, and the residue is stated rather than left to be found. The
-          # mint's outer FRAME never reaches this gate at all — it is synthesized by the mint and is not
-          # caller data — so a record of the full three-attribute shape STILL mints at the frame while
-          # refusing everywhere caller data can put it. `test-derivation-shape-refused-wherever-caller-
-          # data-reaches` pins exactly that, frame arm included. What changed is which values sit in the
-          # discontinuous population: it was every record whose `type` field held a string, which is an
-          # ordinary declaration, and it is now only the full derivation shape, which no kind declares
-          # by accident. The remaining discontinuity errs toward MINTING a synthesized frame rather than
-          # refusing a legitimate value, which is the direction that costs an identity nothing.
-          #
-          # Requiring `drvPath` and `outPath` alongside `type` costs no termination guarantee: what does
-          # not terminate is the self-referential output attribute, and a record carrying all three
-          # WITHOUT that structure is finite and bounded like any other. The three-attribute shape is
-          # what an actual derivation has, so every value the gate exists to stop is still stopped.
-          # Presence tests do not force, so widening the gate forces nothing new either.
-          if (v.type or null) == "derivation" && v ? drvPath && v ? outPath then
-            throw "identity: a derivation in an identity position${frameOf kind label}"
+          "z"
+        # A composite renders as an opening tag, each member followed by the separator, and a closing
+        # tag. A node RETURNS ITS STRING: the budget is CHECKED against the strings, not threaded
+        # through them. `r` is the budget remaining before the opening tag, and every member is encoded
+        # against `r - 1`, the budget left after that tag — an UPPER bound on what the member may
+        # spend, so a member too long on its own refuses inside its own walk. The fold then charges the
+        # members' ACTUAL lengths, separator included, in order, and refuses at the first member that
+        # leaves no room for the closing tag, before a later member is forced.
+        #
+        # ★★ THE FOLD IS WHAT BOUNDS BREADTH — the third axis, which neither the length budget nor the
+        # depth bound reaches on its own. Its accumulator is a flat int, so `foldl'`'s WHNF force is
+        # full evaluation, and each member's string is forced as the fold reaches it: no budget and no
+        # concatenation is left to accrete as a thunk chain the walk never inspects, and the join is
+        # one `concatStringsSep` over strings already forced. An unforced n-link chain is what a wide
+        # value overflows on, uncatchably: a 31,000-element list — preimage 62,009 characters, depth 2,
+        # inside both bounds — aborts with `stack overflow` when either is left to accrete. This is
+        # ADR-0022's probe constraint arriving in the identity domain: every round-loop accumulator is
+        # forced per round.
+        #
+        # ★ THE DESCENT SPENDS AS FEW CALL FRAMES AS IT CAN, because the depth bound's margin is
+        # frames per level (see the bounds above). An arithmetic or comparison operator is a builtin
+        # call and holds a frame while it forces its operand, so the member and the fold's result are
+        # forced by native `!=` / `==` instead, and a list member is a partial application of `enc`
+        # rather than a wrapping lambda: a list level costs `enc`, `foldl'` and the fold's step, and a
+        # record level one more, its key-prefixing lambda.
+        #
+        # ★ WHY CHECKED AND NOT THREADED. Threading the exact remaining budget through every node costs
+        # a `{ s; b; }` record and a continuation per fragment, which is most of what a mint spends
+        # when the budget is threaded. The preimage is byte-identical either way,
+        # so no identity moves, and a value is refused for length exactly when its preimage exceeds the
+        # budget, since the outer frame charges the exact remainder. What the upper bound changes is
+        # confined to values that are REFUSED either way, and it is stated rather than left to be found:
+        #   - WHICH refusal names a value: one over budget that ALSO holds a lambda, path, derivation or
+        #     depth refusal inside the member that crosses can name that refusal rather than the budget,
+        #     because the member is walked against its upper bound before the fold charges it;
+        #   - WHAT a refusal costs: up to about one budget of walked members per enclosing level, so
+        #     `identityDepth × identityBudget` characters at worst rather than one budget — bounded,
+        #     and never the expansion the refusal declined to build.
+        else if builtins.isList v || builtins.isAttrs v then
+          let
+            list = builtins.isList v;
+            d' = d + 1;
+            r' = r - 1;
+            strs =
+              if list then
+                map (enc d' r') v
+              # A DERIVATION IS REFUSED BY TYPE TEST, BEFORE ANY DESCENT. A derivation's output attribute is
+              # self-referential (`drv.out.out.out.name` resolves), so an unbounded walk over one does not
+              # terminate. This gate exists for TERMINATION and not for forgery — the tagged encoding
+              # already closes the `outPath` channel.
+              #
+              # ★★ THE TEST IS THE FULL THREE-ATTRIBUTE SHAPE, AND THE NARROWER FORM WAS DISCONTINUOUS UNDER
+              # NESTING. Testing `type` alone refuses any record whose `type` field happens to hold the
+              # string "derivation" — an ordinary declaration, since a `str` option may be named anything.
+              # That made ADMISSIBILITY DEPEND ON POSITION rather than on the value: measured, the record
+              # `{ type = "derivation"; n = 1; }` MINTED as the mint's own outer frame and REFUSED one level
+              # down, with the same shape carrying `type = "ordinary"` minting at both. Position-dependent
+              # admissibility is what ADR-0034's "inert composites are admitted" cannot survive, so the
+              # population it applies to had to shrink.
+              #
+              # ★ IT SHRANK; IT DID NOT VANISH, and the residue is stated rather than left to be found. The
+              # mint's outer FRAME never reaches this gate at all — it is synthesized by the mint and is not
+              # caller data — so a record of the full three-attribute shape STILL mints at the frame while
+              # refusing everywhere caller data can put it. `test-derivation-shape-refused-wherever-caller-
+              # data-reaches` pins exactly that, frame arm included. What changed is which values sit in the
+              # discontinuous population: it was every record whose `type` field held a string, which is an
+              # ordinary declaration, and it is now only the full derivation shape, which no kind declares
+              # by accident. The remaining discontinuity errs toward MINTING a synthesized frame rather than
+              # refusing a legitimate value, which is the direction that costs an identity nothing.
+              #
+              # Requiring `drvPath` and `outPath` alongside `type` costs no termination guarantee: what does
+              # not terminate is the self-referential output attribute, and a record carrying all three
+              # WITHOUT that structure is finite and bounded like any other. The three-attribute shape is
+              # what an actual derivation has, so every value the gate exists to stop is still stopped.
+              # Presence tests do not force, so widening the gate forces nothing new either.
+              else if (v.type or null) == "derivation" && v ? drvPath && v ? outPath then
+                throw "identity: a derivation in an identity position${frameOf kind label}"
+              else
+                map (k: builtins.toJSON k + ":" + enc d' r' v.${k}) (builtins.attrNames v);
+            left = builtins.foldl' (
+              a: str:
+              # Never fires: every rendering begins with its type tag. It forces the member natively.
+              assert str != "";
+              let
+                a' = a - builtins.stringLength str - 1;
+              in
+              if a' < 1 then over else a'
+            ) (r - 1) strs;
+          in
+          # A member leaves room for the closing tag, so only an EMPTY composite reaches `0` here.
+          if left == 0 then
+            over
           else
-            encodeComposite b "{" "}" (b': k: encodeField (d + 1) b' v k) (builtins.attrNames v)
+            (if list then "[" else "{")
+            + builtins.concatStringsSep "," strs
+            + (if strs == [ ] then "" else ",")
+            + (if list then "]" else "}")
         else
           # Lambdas and paths land here, named by their own type. A lambda has no eliminator in Nix — no
           # builtin exposes a closure's captured environment or its body — so no preimage over one can
@@ -331,7 +311,23 @@ let
           throw "identity: a ${builtins.typeOf v} in an identity position${frameOf kind label}";
     in
     {
-      inherit encodeComposite encodeField;
+      # One field of the mint's own frame: the JSON-rendered key, a colon, then the field's encoding
+      # from depth 1, charged against `b`, the frame's EXACT remaining budget. The frame threads it
+      # (see `canonicalPreimage`), so a budget refusal at the frame names the label that crossed.
+      field =
+        b: v: k:
+        let
+          key = builtins.toJSON k + ":";
+          str = key + enc 1 (b - builtins.stringLength key) v.${k};
+          rest = b - builtins.stringLength str;
+        in
+        if rest < 0 then
+          over
+        else
+          {
+            s = str;
+            b = rest;
+          };
     };
 
   # The PAIRS preimage — a digest of the ⟨label, value⟩ pairs alone. The kind is NOT in it; it rides
@@ -347,8 +343,8 @@ let
   # The structural refusals are checked on the LABEL LIST, before any value is forced, so the first
   # error a caller sees names the structural mistake and not a downstream symptom of it.
   #
-  # ★ THE OUTER FRAME IS THE MINT'S OWN, so it is rendered by `encodeComposite` DIRECTLY rather than
-  # by handing a synthesized record back to `canonicalEncode`. Routing it through the walk would
+  # ★ THE OUTER FRAME IS THE MINT'S OWN, so it is rendered by its own fold DIRECTLY rather than
+  # by handing a synthesized record back to `enc`. Routing it through the walk would
   # apply the derivation gate to a record the mint just built, and a kind carrying an ordinary
   # `type` option whose value happened to be the string "derivation" would then be refused an
   # identity it is entitled to. The frame is not caller data; its FIELDS are, and those take the
@@ -386,9 +382,27 @@ let
       throw "identity: duplicate identity key ${builtins.toJSON (dupOf labels)}${frameOf kind null}"
     else
       # The mint's own frame names the kind; each label's walk runs in that label's own instance.
-      ((mkEncoder kind null).encodeComposite identityBudget "{" "}" (
-        b: k: (mkEncoder kind k).encodeField 1 b pairs k
-      ) (builtins.attrNames pairs)).s;
+      let
+        over = throw "identity: preimage exceeds the identity budget${frameOf kind null}";
+        # Both fields forced per label, for the reason the composite fold forces its own.
+        stepped =
+          builtins.foldl'
+            (
+              acc: k:
+              let
+                f = (mkEncoder kind k).field acc.b pairs k;
+                s = acc.s + f.s + ",";
+                b = f.b - 1;
+              in
+              if b < 0 then over else builtins.seq s { inherit s b; }
+            )
+            {
+              s = "{";
+              b = identityBudget - 1;
+            }
+            (builtins.attrNames pairs);
+      in
+      if stepped.b < 1 then over else stepped.s + "}";
 
   # The SINGLE minting authority. An identity is the kind tag joined to a digest of the pairs:
   #

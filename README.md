@@ -33,8 +33,8 @@ Without flakes: `import ./path/to/gen-identity` is a nullary function over the l
 
 ## The surface
 
-**One binding publishes.** `hashIdentity`. The encoder beneath it — `canonicalEncode`,
-`canonicalPreimage`, `emit`, `encodeComposite`, `encodeField` — and its bound constants stay
+**One binding publishes.** `hashIdentity`. The encoder beneath it — `mkEncoder` and its `enc`
+and `field`, `canonicalPreimage` — and its bound constants stay
 internal, and that is a decision rather than an omission: the raw encoder's signature threads a
 budget, so publishing it would hand a caller a second refusal policy over the same encoding,
 and the bounds and the encoder are one mechanism rather than two. `ci/tests/surface.nix` pins

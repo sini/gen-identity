@@ -16,6 +16,8 @@
       inherit inputs;
       name = "gen-identity";
       testModules = ./tests;
+      # The reference encoder and the corpus `tests/mint-equality.nix` re-mints against it.
+      readRoots = [ ./mint-reference ];
       # `./ci#testsError` — refusal cells that pin the MESSAGE; see the file's header.
       extraModules = [ ./tests-error.nix ];
       specialArgs = { inherit genIdentity; };

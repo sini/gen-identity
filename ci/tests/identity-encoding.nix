@@ -791,8 +791,8 @@ in
   # aborted with `stack overflow` ESCAPING `tryEval`, and so did a list whose preimage was over
   # budget — the budget could not refuse it because the budget was itself still an unforced thunk.
   #
-  # The bounds were never too loose; they had not been EVALUATED. `encodeComposite` forces both
-  # accumulator fields at every step, which is what makes the length budget bite on this axis at
+  # The bounds were never too loose; they had not been EVALUATED. The composite fold forces its
+  # accumulator and each member at every step, which is what makes the length budget bite on this axis at
   # all. A wide value now either MINTS or REFUSES BY NAME, and never aborts.
   flake.tests.identity-encoding.test-breadth-is-bounded-and-never-aborts = {
     expr = {
