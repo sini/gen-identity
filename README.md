@@ -52,8 +52,9 @@ than blocked case by case — a string can never render as a list, because its r
 
 **Refused by name** — a lambda (no builtin exposes a closure's captured environment or its
 body, so no preimage over one can be total), a path (`toJSON` on a file path silently copies it
-to the store), a derivation (its output attribute is self-referential, so an unbounded walk does
-not terminate), a float outside `|v| < 2^53`, a non-string or empty kind, a kind containing `:`,
+to the store), a derivation (a record whose `type` is `"derivation"` and which carries `outPath`:
+Nix `==` compares one by `outPath` alone, so a structural preimage would be finer than `==`, and
+its output attribute is self-referential, so an unbounded walk does not terminate), a float outside `|v| < 2^53`, a non-string or empty kind, a kind containing `:`,
 zero labels, a non-string label, and a duplicate label. A refusal raised after the kind passes
 its guards names the kind, and inside a label's walk the label too
 (`identity: a lambda in an identity position; kind "attaches", label "entity"`). It never

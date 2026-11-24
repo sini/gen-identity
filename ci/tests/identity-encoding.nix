@@ -90,13 +90,19 @@ let
 
   # ── fixtures for the derivation gate ──
   #
-  # `drvShaped` is HAND-WRITTEN to the shape the gate tests — all three attributes — which makes it a
-  # fixture for the PREDICATE and not for the hazard. `typeOnly` carries the word alone, which is an
-  # ordinary declaration a `str` option may hold.
+  # `drvShaped` is HAND-WRITTEN to the shape an actual derivation has — all three attributes — which
+  # makes it a fixture for the PREDICATE and not for the hazard. `drvNoDrvPath` is the shape the gate
+  # tests, `type` with `outPath`, which Nix `==` compares by `outPath` alone. `typeOnly` carries the
+  # word alone, which is an ordinary declaration a `str` option may hold.
   drvShaped = {
     type = "derivation";
     drvPath = "/nix/store/0000000000000000000000000000000-probe.drv";
     outPath = "/nix/store/1111111111111111111111111111111-probe";
+  };
+  drvNoDrvPath = a: {
+    type = "derivation";
+    outPath = "x";
+    inherit a;
   };
   typeOnly = {
     type = "derivation";
@@ -562,8 +568,8 @@ in
       function = refuses (idOf (y: y));
       path = refuses (idOf ./.);
       # The FULL three-attribute shape, which is what an actual derivation carries. The gate tests
-      # all three so a record merely HOLDING the word stays admissible at every depth — see
-      # `test-derivation-gate-does-not-depend-on-position`.
+      # `type` with `outPath`, so a record merely HOLDING the word stays admissible at every depth —
+      # see `test-derivation-gate-does-not-depend-on-position`.
       derivation = refuses (idOf drvShaped);
       nestedFunction = refuses (idOf {
         a = [ { f = y: y; } ];
@@ -831,7 +837,7 @@ in
   # ★ A value the encoder admits at one depth and refuses at another is not a domain. Testing `type`
   # alone did exactly that: a record whose `type` field merely held the string "derivation" minted as
   # the mint's own outer frame — which is not caller data and skips the gate — and refused one level
-  # down. Requiring the full three-attribute shape makes admissibility a property of the VALUE.
+  # down. Requiring `outPath` beside `type` makes admissibility a property of the VALUE.
   #
   # CONTROL, in the same cell: the identical shape carrying an ordinary `type` mints at both
   # positions, so the cell is about the gate and not about the two positions differing generally.
@@ -883,6 +889,39 @@ in
       nested = true;
       deep = true;
       inAList = true;
+      frameOfThoseLabelsStillMints = true;
+    };
+  };
+
+  # THE GATE IS WHERE `==` STOPS COMPARING STRUCTURE. Nix `==` compares a record whose `type` is
+  # "derivation" and which carries `outPath` by `outPath` alone, so the pair below is `==`-equal while
+  # a structural encoding splits it: minting it made the mint finer than `==`. It is refused at every
+  # depth caller data can put it, with or without `drvPath`. Two controls keep the gate from widening:
+  # `type` alone still mints and splits, as `==` compares it structurally, and so does `outPath` with
+  # no `type`. The outer frame is the stated exception (the gate's comment): a kind whose identity keys
+  # are `type` and `outPath` still mints there.
+  flake.tests.identity-encoding.test-a-derivation-without-drvPath-is-refused-where-eq-joins-it = {
+    expr = {
+      eqJoinsThePair = drvNoDrvPath 1 == drvNoDrvPath 2;
+      nested = refuses (idOf (drvNoDrvPath 1));
+      inAList = refuses (idOf [ (drvNoDrvPath 1) ]);
+      inARecord = refuses (idOf {
+        p = drvNoDrvPath 1;
+      });
+      typeOnlyMintsAndSplits = idOf typeOnly != idOf (typeOnly // { n = 2; });
+      outPathOnlyMintsAndSplits =
+        idOf (removeAttrs (drvNoDrvPath 1) [ "type" ]) != idOf (removeAttrs (drvNoDrvPath 2) [ "type" ]);
+      frameOfThoseLabelsStillMints = admits (
+        hashIdentity "k" [ "type" "outPath" ] (pick (drvNoDrvPath 1))
+      );
+    };
+    expected = {
+      eqJoinsThePair = true;
+      nested = true;
+      inAList = true;
+      inARecord = true;
+      typeOnlyMintsAndSplits = true;
+      outPathOnlyMintsAndSplits = true;
       frameOfThoseLabelsStillMints = true;
     };
   };

@@ -30,6 +30,21 @@ let
     outPath = "x";
     name = { x = 1; }.y;
   };
+  # nixpkgs' `lib.toDerivation` shape, built by hand since gen-identity takes no inputs: `type` and
+  # `outPath` with no `drvPath`, and a self-referential `out`, so a walk past the gate meets the
+  # depth bound and names that instead.
+  toDerivation =
+    let
+      res = {
+        type = "derivation";
+        name = "probe";
+        outPath = "/nix/store/0000000000000000000000000000000-probe";
+        outputs = [ "out" ];
+        out = res;
+        outputName = "out";
+      };
+    in
+    res;
   deep = builtins.foldl' (acc: _: [ acc ]) 0 (builtins.genList (x: x) 600);
   longKind = builtins.concatStringsSep "" (builtins.genList (_: "k") 200);
 in
@@ -76,6 +91,17 @@ in
       expectedError = {
         type = "ThrownError";
         msg = ''^identity: a derivation in an identity position; kind "k", label "a"$'';
+      };
+    };
+    # The derivation gate names it, not the depth bound.
+    test-to-derivation-names-the-derivation-not-the-depth-bound = {
+      expr = attaches {
+        aspect = "aspect:0";
+        entity = toDerivation;
+      };
+      expectedError = {
+        type = "ThrownError";
+        msg = ''^identity: a derivation in an identity position; kind "attaches", label "entity"$'';
       };
     };
     test-float-names-kind-and-label = {

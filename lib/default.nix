@@ -257,36 +257,34 @@ let
             strs =
               if list then
                 map (enc d' r') v
-              # A DERIVATION IS REFUSED BY TYPE TEST, BEFORE ANY DESCENT. A derivation's output attribute is
-              # self-referential (`drv.out.out.out.name` resolves), so an unbounded walk over one does not
-              # terminate. This gate exists for TERMINATION and not for forgery — the tagged encoding
-              # already closes the `outPath` channel.
+              # A DERIVATION IS REFUSED BY TYPE TEST, BEFORE ANY DESCENT. A derivation here is a record whose
+              # `type` is "derivation" and which carries `outPath`: exactly where Nix `==` stops comparing
+              # structure and compares `outPath` alone (ADR-0034, the definition ruled for caller-value
+              # positions). The gate has two grounds, and each needs both attributes.
+              #   - IDENTITY: two such records differing anywhere but `outPath` are `==`-equal, so encoding them
+              #     structurally would make the mint FINER than `==` (ADR-0016 ruling 4). Refusing them leaves a
+              #     decision site to compare them by `==` itself.
+              #   - TERMINATION: a derivation's output attribute is self-referential (`drv.out.out.out.name`
+              #     resolves), so an unbounded walk over one does not terminate. nixpkgs' `lib.toDerivation`
+              #     builds one with no `drvPath`; a gate that also required `drvPath` let it through, to be
+              #     stopped only by the depth bound under that bound's name.
+              # The tagged encoding already closes the `outPath` channel, so the gate is not about forgery.
               #
-              # ★★ THE TEST IS THE FULL THREE-ATTRIBUTE SHAPE, AND THE NARROWER FORM WAS DISCONTINUOUS UNDER
-              # NESTING. Testing `type` alone refuses any record whose `type` field happens to hold the
-              # string "derivation" — an ordinary declaration, since a `str` option may be named anything.
-              # That made ADMISSIBILITY DEPEND ON POSITION rather than on the value: measured, the record
-              # `{ type = "derivation"; n = 1; }` MINTED as the mint's own outer frame and REFUSED one level
-              # down, with the same shape carrying `type = "ordinary"` minting at both. Position-dependent
-              # admissibility is what ADR-0034's "inert composites are admitted" cannot survive, so the
-              # population it applies to had to shrink.
+              # ★★ `type` ALONE IS NOT THE TEST, BECAUSE THAT FORM WAS DISCONTINUOUS UNDER NESTING. Testing `type`
+              # alone refuses any record whose `type` field holds the string "derivation" — an ordinary
+              # declaration, since a `str` option may be named anything — and `==` compares such a record
+              # structurally. Measured, `{ type = "derivation"; n = 1; }` MINTED as the mint's own outer frame and
+              # REFUSED one level down, with the same shape carrying `type = "ordinary"` minting at both.
+              # Position-dependent admissibility is what ADR-0034's "inert composites are admitted" cannot
+              # survive. That record still mints at every depth; `{ outPath = "x"; a = 1; }` with no `type` is
+              # encoded structurally too, as `==` compares it.
               #
-              # ★ IT SHRANK; IT DID NOT VANISH, and the residue is stated rather than left to be found. The
-              # mint's outer FRAME never reaches this gate at all — it is synthesized by the mint and is not
-              # caller data — so a record of the full three-attribute shape STILL mints at the frame while
-              # refusing everywhere caller data can put it. `test-derivation-shape-refused-wherever-caller-
-              # data-reaches` pins exactly that, frame arm included. What changed is which values sit in the
-              # discontinuous population: it was every record whose `type` field held a string, which is an
-              # ordinary declaration, and it is now only the full derivation shape, which no kind declares
-              # by accident. The remaining discontinuity errs toward MINTING a synthesized frame rather than
-              # refusing a legitimate value, which is the direction that costs an identity nothing.
-              #
-              # Requiring `drvPath` and `outPath` alongside `type` costs no termination guarantee: what does
-              # not terminate is the self-referential output attribute, and a record carrying all three
-              # WITHOUT that structure is finite and bounded like any other. The three-attribute shape is
-              # what an actual derivation has, so every value the gate exists to stop is still stopped.
-              # Presence tests do not force, so widening the gate forces nothing new either.
-              else if (v.type or null) == "derivation" && v ? drvPath && v ? outPath then
+              # ★ THE OUTER FRAME IS THE STATED EXCEPTION. It never reaches this gate — it is synthesized by the
+              # mint and is not caller data — so a kind whose identity keys are `type` and `outPath`, holding
+              # "derivation" and a string, still mints at the frame while the same record refuses everywhere
+              # caller data can put it. `test-derivation-shape-refused-wherever-caller-data-reaches` pins that,
+              # frame arm included. Presence tests do not force, so the gate forces nothing.
+              else if (v.type or null) == "derivation" && v ? outPath then
                 throw "identity: a derivation in an identity position${frameOf kind label}"
               else
                 map (k: builtins.toJSON k + ":" + enc d' r' v.${k}) (builtins.attrNames v);
