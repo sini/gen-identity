@@ -304,8 +304,8 @@ let
           #     decision site to compare them by `==` itself.
           #   - TERMINATION: a derivation's output attribute is self-referential (`drv.out.out.out.name`
           #     resolves), so an unbounded walk over one does not terminate. nixpkgs' `lib.toDerivation`
-          #     builds one with no `drvPath`; a gate that also required `drvPath` let it through, to be
-          #     stopped only by the depth bound under that bound's name.
+          #     builds one with no `drvPath`; a gate that also required `drvPath` let it through: impure, the
+          #     depth bound stopped it under that bound's name; pure, the walk forced `builtins.storePath` and aborted.
           # The tagged encoding already closes the `outPath` channel, so the gate is not about forgery.
           #
           # ★★ `type` ALONE IS NOT THE TEST, BECAUSE THAT FORM WAS DISCONTINUOUS UNDER NESTING. Testing `type`
@@ -321,7 +321,8 @@ let
           # mint and is not caller data — so a kind whose identity keys are `type` and `outPath`, holding
           # "derivation" and a string, still mints at the frame while the same record refuses everywhere
           # caller data can put it. `test-derivation-shape-refused-wherever-caller-data-reaches` pins that,
-          # frame arm included. Presence tests do not force, so the gate forces nothing.
+          # frame arm included; whether that residue belongs in the law is left open. Presence tests do not
+          # force, so the gate forces nothing.
           if (v.type or null) == "derivation" && v ? outPath then
             throw "identity: a derivation in an identity position${frameOf kind label}"
           else

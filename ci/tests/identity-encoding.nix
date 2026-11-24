@@ -104,6 +104,11 @@ let
     outPath = "x";
     inherit a;
   };
+  drvPathNoOutPath = a: {
+    type = "derivation";
+    drvPath = "d";
+    inherit a;
+  };
   typeOnly = {
     type = "derivation";
     n = 1;
@@ -896,10 +901,11 @@ in
   # THE GATE IS WHERE `==` STOPS COMPARING STRUCTURE. Nix `==` compares a record whose `type` is
   # "derivation" and which carries `outPath` by `outPath` alone, so the pair below is `==`-equal while
   # a structural encoding splits it: minting it made the mint finer than `==`. It is refused at every
-  # depth caller data can put it, with or without `drvPath`. Two controls keep the gate from widening:
-  # `type` alone still mints and splits, as `==` compares it structurally, and so does `outPath` with
-  # no `type`. The outer frame is the stated exception (the gate's comment): a kind whose identity keys
-  # are `type` and `outPath` still mints there.
+  # depth caller data can put it, with or without `drvPath`. Three controls keep the gate from widening:
+  # `type` alone still mints and splits, as `==` compares it structurally (that arm tells C1 from a gate
+  # on `type` alone), and so does `type` with `drvPath` and no `outPath`; `outPath` with no `type` mints
+  # and splits too (that arm rejects a gate on `outPath` presence alone). The outer frame is not walked (the gate's comment): a kind whose identity keys are
+  # `type` and `outPath` still mints there, a residue left open rather than ruled.
   flake.tests.identity-encoding.test-a-derivation-without-drvPath-is-refused-where-eq-joins-it = {
     expr = {
       eqJoinsThePair = drvNoDrvPath 1 == drvNoDrvPath 2;
@@ -909,6 +915,7 @@ in
         p = drvNoDrvPath 1;
       });
       typeOnlyMintsAndSplits = idOf typeOnly != idOf (typeOnly // { n = 2; });
+      typeWithDrvPathNoOutPathMintsAndSplits = idOf (drvPathNoOutPath 1) != idOf (drvPathNoOutPath 2);
       outPathOnlyMintsAndSplits =
         idOf (removeAttrs (drvNoDrvPath 1) [ "type" ]) != idOf (removeAttrs (drvNoDrvPath 2) [ "type" ]);
       frameOfThoseLabelsStillMints = admits (
@@ -921,6 +928,7 @@ in
       inAList = true;
       inARecord = true;
       typeOnlyMintsAndSplits = true;
+      typeWithDrvPathNoOutPathMintsAndSplits = true;
       outPathOnlyMintsAndSplits = true;
       frameOfThoseLabelsStillMints = true;
     };
